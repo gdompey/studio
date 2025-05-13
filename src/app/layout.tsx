@@ -6,7 +6,6 @@ import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/components/auth/AuthContext';
 
 const geistSans = GeistSans;
-
 const geistMono = GeistMono;
 
 export const metadata: Metadata = {
@@ -21,7 +20,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans`}>
+      <body 
+        className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans`} 
+        suppressHydrationWarning
+      >
         <AuthProvider>
           {children}
           <Toaster />
