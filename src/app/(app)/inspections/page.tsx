@@ -4,7 +4,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { FileText, PlusCircle, Search } from 'lucide-react';
+import { FileText, PlusCircle, Search, Truck } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -32,12 +32,13 @@ const getMockInspections = (): InspectionData[] => {
         id: id,
         inspectorId: `inspector-${i}`,
         inspectorName: `Inspector ${i}`,
-        vin: `VINMOCK00000000${i}`,
+        truckIdNo: `TRUCKIDMOCK00${i}`, // Renamed from vin
+        truckRegNo: `REGNO00${i}`, // Added
         timestamp: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString(),
         photos: [],
-        notes: `This is a mock inspection note for vehicle ${i}.`,
-        checklistAnswers: { exterior_damage_present: i % 2 === 0 ? 'Yes' : 'No' },
-        damageSummary: i % 2 === 0 ? `Some damage noted on vehicle ${i}.` : undefined,
+        notes: `This is a mock inspection note for truck ${i}.`,
+        checklistAnswers: { exterior_damage_present: i % 2 === 0 ? 'Yes' : 'No', fuel_quantity: '1/2 Tank' },
+        damageSummary: i % 2 === 0 ? `Some damage noted on truck ${i}.` : undefined,
       });
     }
   }
@@ -54,7 +55,8 @@ export default function InspectionsListPage() {
   }, []);
   
   const filteredInspections = inspections.filter(inspection => 
-    inspection.vin.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    inspection.truckIdNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    inspection.truckRegNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
     inspection.inspectorName?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -63,11 +65,11 @@ export default function InspectionsListPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-primary flex items-center gap-2">
-            <FileText className="h-8 w-8" />
-            Vehicle Inspections
+            <Truck className="h-8 w-8" /> {/* Changed icon to Truck */}
+            Truck Inspections
           </h1>
           <p className="text-muted-foreground mt-1">
-            Browse, search, and manage all vehicle inspections.
+            Browse, search, and manage all truck inspections.
           </p>
         </div>
         <Button asChild className="bg-accent hover:bg-accent/90 text-accent-foreground">
@@ -83,7 +85,7 @@ export default function InspectionsListPage() {
           <div className="flex items-center space-x-2">
             <Search className="h-5 w-5 text-muted-foreground" />
             <Input 
-              placeholder="Search by VIN or Inspector Name..."
+              placeholder="Search by Truck ID, Reg No, or Inspector..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="max-w-sm"
@@ -95,7 +97,8 @@ export default function InspectionsListPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>VIN</TableHead>
+                  <TableHead>Truck ID No.</TableHead>
+                  <TableHead>Truck Reg No.</TableHead>
                   <TableHead>Inspector</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Status</TableHead>
@@ -105,7 +108,8 @@ export default function InspectionsListPage() {
               <TableBody>
                 {filteredInspections.map((inspection) => (
                   <TableRow key={inspection.id}>
-                    <TableCell className="font-medium">{inspection.vin}</TableCell>
+                    <TableCell className="font-medium">{inspection.truckIdNo}</TableCell>
+                    <TableCell>{inspection.truckRegNo}</TableCell>
                     <TableCell>{inspection.inspectorName || inspection.inspectorId}</TableCell>
                     <TableCell>{new Date(inspection.timestamp).toLocaleDateString()}</TableCell>
                     <TableCell>

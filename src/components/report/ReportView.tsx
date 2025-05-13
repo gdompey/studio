@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import Image from 'next/image';
-import { User, CalendarDays, Car, FileText, ShieldCheck, Camera, StickyNote, Wand2 } from 'lucide-react';
+import { User, CalendarDays, Truck, FileText, ShieldCheck, Camera, StickyNote, Wand2 } from 'lucide-react'; // Changed Car to Truck
 import { APP_NAME } from '@/lib/constants';
 
 interface ReportViewProps {
@@ -18,7 +18,8 @@ export function ReportView({ reportData }: ReportViewProps) {
     id,
     inspectorId,
     inspectorName,
-    vin,
+    truckIdNo, // Renamed from vin
+    truckRegNo, // Added
     timestamp,
     photos,
     notes,
@@ -66,8 +67,9 @@ export function ReportView({ reportData }: ReportViewProps) {
           <DataItem label="Inspector Name" value={inspectorName} />
         </Section>
 
-        <Section title="Vehicle Details" icon={Car}>
-          <DataItem label="VIN" value={vin} />
+        <Section title="Truck Details" icon={Truck}> {/* Changed icon and title */}
+          <DataItem label="Truck ID No." value={truckIdNo} />
+          <DataItem label="Truck Reg No." value={truckRegNo} />
           <DataItem label="Inspection Date" value={new Date(timestamp).toLocaleString()} />
         </Section>
 
@@ -79,6 +81,8 @@ export function ReportView({ reportData }: ReportViewProps) {
                   <Badge variant={value ? 'default' : 'destructive'} className={value ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'}>
                     {value ? 'Yes' : 'No'}
                   </Badge>
+                ) : Array.isArray(value) && value.every(item => typeof item === 'string' && item.startsWith('data:image')) ? (
+                  <span>{value.length} photo(s) uploaded</span>
                 ) : (
                   <span className="text-foreground">{String(value) || 'N/A'}</span>
                 )}

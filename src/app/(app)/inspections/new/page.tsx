@@ -1,10 +1,10 @@
 // src/app/(app)/inspections/new/page.tsx
 import { InspectionForm } from '@/components/inspection/InspectionForm';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { FileEdit } from 'lucide-react';
+import { FileEdit, Truck } from 'lucide-react'; // Changed icon to Truck
 
 export const metadata = {
-  title: 'New Inspection | IASL EC Manager',
+  title: 'New Truck Inspection | IASL EC Manager', // Updated title
 };
 
 export default function NewInspectionPage() {
@@ -12,11 +12,11 @@ export default function NewInspectionPage() {
     <div className="max-w-4xl mx-auto">
       <header className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight text-primary flex items-center gap-2">
-            <FileEdit className="h-8 w-8" />
-            New Vehicle Inspection
+            <Truck className="h-8 w-8" /> {/* Changed icon to Truck */}
+            New Truck Inspection {/* Updated header text */}
         </h1>
         <p className="text-muted-foreground mt-1">
-          Fill out the form below to record a new vehicle inspection.
+          Fill out the form below to record a new truck inspection.
         </p>
       </header>
       <InspectionForm />

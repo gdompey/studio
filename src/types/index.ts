@@ -10,7 +10,7 @@ export interface User {
 
 export interface ChecklistItemCondition {
   field: string;
-  value: any;
+  value: any; // Allow for boolean, string, etc.
 }
 
 export interface ChecklistItem {
@@ -28,10 +28,12 @@ export interface InspectionData {
   id: string;
   inspectorId: string;
   inspectorName?: string;
-  vin: string;
+  truckIdNo: string; // Renamed from vin
+  truckRegNo: string; // Added
   timestamp: string;
   photos: { name: string; url: string; dataUri?: string }[]; // dataUri is temporary for AI
   notes?: string;
   checklistAnswers: Record<string, any>;
   damageSummary?: string;
 }
+
