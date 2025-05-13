@@ -6,7 +6,7 @@ import type { UserRole } from '@/lib/constants';
 import { USER_ROLES } from '@/lib/constants';
 import React, { createContext, useState, useEffect, ReactNode, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import AuthChildrenWrapper from './AuthChildrenWrapper'; // Re-added import
+// import AuthChildrenWrapper from './AuthChildrenWrapper'; // Removed import
 
 interface AuthContextType {
   user: User | null;
@@ -50,12 +50,19 @@ const mockSignOut = async () => {
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasMounted, setHasMounted] = useState(false); // Added for hydration safety
   const router = useRouter();
 
   useEffect(() => {
+    setHasMounted(true); // Component has mounted
     const storedUser = localStorage.getItem('iasl-user');
     if (storedUser) {
-      setUser(JSON.parse(storedUser));
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.error("Failed to parse user from localStorage", e);
+        localStorage.removeItem('iasl-user');
+      }
     }
     setLoading(false);
   }, []);
@@ -103,15 +110,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const contextValue = useMemo(() => ({
     user,
     role: user?.role || null,
-    loading,
+    loading: loading || !hasMounted, // Loading is true until mounted and actual loading is false
     signIn,
     signOut,
     signUp
-  }), [user, loading, signIn, signOut, signUp]);
+  }), [user, loading, signIn, signOut, signUp, hasMounted]);
+
+  // Render children only after mount to ensure localStorage access is client-side only
+  // This prevents hydration mismatches related to auth state.
+  if (!hasMounted) {
+    return null; 
+  }
 
   return (
     <AuthContext.Provider value={contextValue}>
-      <AuthChildrenWrapper>{children}</AuthChildrenWrapper> {/* Use the wrapper */}
+      {children}
     </AuthContext.Provider>
   );
 };
