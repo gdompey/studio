@@ -32,13 +32,17 @@ const getMockInspections = (): InspectionData[] => {
         id: id,
         inspectorId: `inspector-${i}`,
         inspectorName: `Inspector ${i}`,
-        truckIdNo: `TRUCKIDMOCK00${i}`, // Renamed from vin
-        truckRegNo: `REGNO00${i}`, // Added
+        truckIdNo: `TRUCKIDMOCK00${i}`, 
+        truckRegNo: `REGNO00${i}`, 
         timestamp: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString(),
-        photos: [],
+        photos: [
+          { name: `initial_photo_mock_${i}.jpg`, url: `https://picsum.photos/seed/${id}_truck/300/200`, dataUri: `https://picsum.photos/seed/${id}_truck_data/300/200` }
+        ],
         notes: `This is a mock inspection note for truck ${i}.`,
         checklistAnswers: { exterior_damage_present: i % 2 === 0 ? 'Yes' : 'No', fuel_quantity: '1/2 Tank' },
         damageSummary: i % 2 === 0 ? `Some damage noted on truck ${i}.` : undefined,
+        latitude: 34.0522 + (Math.random() - 0.5) * 0.1, // Mock LA coordinates
+        longitude: -118.2437 + (Math.random() - 0.5) * 0.1,
       });
     }
   }
@@ -65,7 +69,7 @@ export default function InspectionsListPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-primary flex items-center gap-2">
-            <Truck className="h-8 w-8" /> {/* Changed icon to Truck */}
+            <Truck className="h-8 w-8" /> 
             Truck Inspections
           </h1>
           <p className="text-muted-foreground mt-1">
@@ -101,6 +105,7 @@ export default function InspectionsListPage() {
                   <TableHead>Truck Reg No.</TableHead>
                   <TableHead>Inspector</TableHead>
                   <TableHead>Date</TableHead>
+                  <TableHead>Location (Lat, Lon)</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -112,6 +117,11 @@ export default function InspectionsListPage() {
                     <TableCell>{inspection.truckRegNo}</TableCell>
                     <TableCell>{inspection.inspectorName || inspection.inspectorId}</TableCell>
                     <TableCell>{new Date(inspection.timestamp).toLocaleDateString()}</TableCell>
+                    <TableCell>
+                      {inspection.latitude && inspection.longitude 
+                        ? `${inspection.latitude.toFixed(3)}, ${inspection.longitude.toFixed(3)}` 
+                        : 'N/A'}
+                    </TableCell>
                     <TableCell>
                       <Badge variant={inspection.damageSummary ? "destructive" : "default"} className={inspection.damageSummary ? "" : "bg-green-500 hover:bg-green-600"}>
                         {inspection.damageSummary ? "Damage Reported" : "No Major Damage"}

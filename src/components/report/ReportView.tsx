@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import Image from 'next/image';
-import { User, CalendarDays, Truck, FileText, ShieldCheck, Camera, StickyNote, Wand2 } from 'lucide-react'; // Changed Car to Truck
+import { User, CalendarDays, Truck, FileText, ShieldCheck, Camera, StickyNote, Wand2, MapPin } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
 
 interface ReportViewProps {
@@ -18,13 +18,15 @@ export function ReportView({ reportData }: ReportViewProps) {
     id,
     inspectorId,
     inspectorName,
-    truckIdNo, // Renamed from vin
-    truckRegNo, // Added
+    truckIdNo,
+    truckRegNo,
     timestamp,
     photos,
     notes,
     checklistAnswers,
     damageSummary,
+    latitude,
+    longitude,
   } = reportData;
 
   const Section: React.FC<{ title: string; icon: React.ElementType; children: React.ReactNode }> = ({ title, icon: Icon, children }) => (
@@ -50,7 +52,7 @@ export function ReportView({ reportData }: ReportViewProps) {
     <Card className="max-w-4xl mx-auto p-4 sm:p-8 shadow-xl print:shadow-none print:border-none">
       <CardHeader className="text-center border-b pb-6 mb-6 print:border-b-2 print:border-gray-300">
         <Image 
-            src="https://picsum.photos/seed/reportlogo/100/100" // Placeholder logo
+            src="https://picsum.photos/seed/reportlogo/100/100"
             alt={`${APP_NAME} Logo`}
             width={60}
             height={60}
@@ -67,10 +69,25 @@ export function ReportView({ reportData }: ReportViewProps) {
           <DataItem label="Inspector Name" value={inspectorName} />
         </Section>
 
-        <Section title="Truck Details" icon={Truck}> {/* Changed icon and title */}
+        <Section title="Truck Details & Location" icon={Truck}>
           <DataItem label="Truck ID No." value={truckIdNo} />
           <DataItem label="Truck Reg No." value={truckRegNo} />
           <DataItem label="Inspection Date" value={new Date(timestamp).toLocaleString()} />
+          {latitude && longitude && (
+            <DataItem label="GPS Location">
+              <p className="text-foreground col-span-2">
+                Lat: {latitude.toFixed(6)}, Lon: {longitude.toFixed(6)}
+                <a 
+                  href={`https://www.google.com/maps?q=${latitude},${longitude}`} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="ml-2 text-accent hover:underline text-xs"
+                >
+                  (View on Map)
+                </a>
+              </p>
+            </DataItem>
+          )}
         </Section>
 
         <Section title="Checklist Summary" icon={FileText}>
@@ -82,7 +99,9 @@ export function ReportView({ reportData }: ReportViewProps) {
                     {value ? 'Yes' : 'No'}
                   </Badge>
                 ) : Array.isArray(value) && value.every(item => typeof item === 'string' && item.startsWith('data:image')) ? (
-                  <span>{value.length} photo(s) uploaded</span>
+                  <span>{value.length} photo(s) uploaded for this item</span>
+                ) : Array.isArray(value) && value.every(item => typeof item === 'string') ? (
+                     <span>{value.join(', ') || 'N/A'}</span> // Handles array of strings, like photo URIs for a checklist item
                 ) : (
                   <span className="text-foreground">{String(value) || 'N/A'}</span>
                 )}
@@ -111,7 +130,7 @@ export function ReportView({ reportData }: ReportViewProps) {
               {photos.map((photo, index) => (
                 <div key={index} className="border rounded-md overflow-hidden shadow-sm aspect-video print:aspect-auto print:h-40">
                   <Image
-                    src={photo.dataUri || photo.url} // Prefer dataUri for display if available, fallback to URL
+                    src={photo.dataUri || photo.url} 
                     alt={photo.name || `Inspection Photo ${index + 1}`}
                     width={300}
                     height={200}

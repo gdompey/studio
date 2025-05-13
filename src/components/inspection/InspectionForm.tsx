@@ -16,27 +16,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { PhotoUpload } from './PhotoUpload';
 import { DamageReportSection } from './DamageReportSection';
 import { useAuth } from '@/hooks/useAuth';
-import type { ChecklistItem, InspectionData } from '@/types';
+import type { ChecklistItem, InspectionData, InspectionPhoto } from '@/types';
 import { USER_ROLES } from '@/lib/constants';
-import { AlertCircle, CheckCircle, Loader2, FileOutput, ListChecks, Car, Truck, StickyNote, Fuel, UserCircle, Building, Users, Briefcase } from 'lucide-react';
+import { AlertCircle, CheckCircle, Loader2, FileOutput, ListChecks, Car, Truck, StickyNote, Fuel, UserCircle, Building, Users, Briefcase, Camera } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 
 // Define a more comprehensive schema for the form
 const inspectionFormSchema = z.object({
-  truckIdNo: z.string().min(1, "Truck ID No. is required"), // Renamed from vin
-  truckRegNo: z.string().min(1, "Truck Reg No. is required"), // Added
+  truckIdNo: z.string().min(1, "Truck ID No. is required"),
+  truckRegNo: z.string().min(1, "Truck Reg No. is required"),
   generalNotes: z.string().optional(),
-  // Dynamic checklist fields will be added based on `checklistItems`
   checklistAnswers: z.record(z.any()).default({}),
-  damageSummary: z.string().optional(), // From AI report
+  damageSummary: z.string().optional(),
 });
 
 type InspectionFormValues = z.infer<typeof inspectionFormSchema>;
 
-// Example checklist definition
 const exampleChecklistItems: ChecklistItem[] = [
-  { id: 'vin_confirmation', label: 'Truck ID No. Match Vehicle?', type: 'radio', options: ['Yes', 'No'], required: true }, // label updated
+  { id: 'vin_confirmation', label: 'Truck ID No. Match Vehicle?', type: 'radio', options: ['Yes', 'No'], required: true },
   { id: 'driver_name', label: 'Driver Name', type: 'text', required: true },
   { id: 'company_name', label: 'Company Name', type: 'text', required: false },
   { id: 'transporter_name', label: 'Transporter Name', type: 'text', required: false },
@@ -54,13 +52,13 @@ const exampleChecklistItems: ChecklistItem[] = [
   },
   { 
     id: 'exterior_photos', 
-    label: 'Exterior Damage Photos', 
-    type: 'photo', // This will render a PhotoUpload component
+    label: 'Exterior Damage Photos (Additional)', 
+    type: 'photo', 
     dependencies: ['exterior_damage_present'],
     conditions: [{field: 'exterior_damage_present', value: 'Yes'}],
   },
   { id: 'interior_condition_rating', label: 'Interior Condition', type: 'select', options: ['Excellent', 'Good', 'Fair', 'Poor'], required: true },
-  { id: 'engine_starts_check', label: 'Engine Starts and Runs Smoothly?', type: 'checkbox' }, // Will be boolean
+  { id: 'engine_starts_check', label: 'Engine Starts and Runs Smoothly?', type: 'checkbox' },
   { 
     id: 'admin_valuation_notes', 
     label: 'Admin Valuation Notes (Admin Only)', 
@@ -69,29 +67,43 @@ const exampleChecklistItems: ChecklistItem[] = [
   },
 ];
 
+interface InspectionFormProps {
+  initialPhotos?: InspectionPhoto[];
+  initialLocation?: { latitude: number; longitude: number } | null;
+}
 
-export function InspectionForm() {
+export function InspectionForm({ initialPhotos = [], initialLocation = null }: InspectionFormProps) {
   const { user, role } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [photoDataUris, setPhotoDataUris] = useState<string[]>([]);
   
+  // photoDataUris for AI report, initialized with initial photos and appended by PhotoUpload components
+  const [photoDataUrisForAI, setPhotoDataUrisForAI] = useState<string[]>(initialPhotos.map(p => p.dataUri));
+  // allPhotos for saving in InspectionData, includes initial and form-uploaded photos
+  const [allPhotos, setAllPhotos] = useState<InspectionPhoto[]>(initialPhotos);
+
+
   const form = useForm<InspectionFormValues>({
     resolver: zodResolver(inspectionFormSchema),
     defaultValues: {
-      truckIdNo: '', // Renamed from vin
-      truckRegNo: '', // Added
+      truckIdNo: '',
+      truckRegNo: '',
       generalNotes: '',
       checklistAnswers: {},
       damageSummary: '',
     },
   });
 
-  const { watch, control, setValue, register: formRegister } = form; // Use formRegister for direct registration
-
-  // Watch relevant fields for dynamic rendering
+  const { watch, control, setValue, register: formRegister } = form;
   const watchedFields = watch();
+
+  useEffect(() => {
+    // Update allPhotos if initialPhotos change (e.g. on re-render, though unlikely here)
+    setAllPhotos(initialPhotos);
+    setPhotoDataUrisForAI(initialPhotos.map(p => p.dataUri));
+  }, [initialPhotos]);
+
 
   const onSubmit: SubmitHandler<InspectionFormValues> = async (data) => {
     setIsLoading(true);
@@ -102,19 +114,20 @@ export function InspectionForm() {
     }
 
     const inspectionData: InspectionData = {
-      id: Date.now().toString(), // Mock ID
+      id: Date.now().toString(), 
       inspectorId: user.id,
       inspectorName: user.name || user.email || "Unknown Inspector",
-      truckIdNo: data.truckIdNo, // Updated
-      truckRegNo: data.truckRegNo, // Added
+      truckIdNo: data.truckIdNo,
+      truckRegNo: data.truckRegNo,
       timestamp: new Date().toISOString(),
-      photos: photoDataUris.map((uri, index) => ({ name: `photo_${index + 1}.jpg`, url: `mock/path/to/photo_${index + 1}.jpg`, dataUri: uri })), // Mock URL
+      photos: allPhotos, // Use the consolidated list of all photos
       notes: data.generalNotes,
       checklistAnswers: data.checklistAnswers,
       damageSummary: data.damageSummary,
+      latitude: initialLocation?.latitude,
+      longitude: initialLocation?.longitude,
     };
 
-    // Simulate saving data
     console.log("Inspection Data to save:", inspectionData);
     await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -134,21 +147,21 @@ export function InspectionForm() {
     setIsLoading(false);
   };
   
-  const handlePhotosUploaded = (photos: { name: string; dataUri: string }[], formItemId?: string) => {
-    const uris = photos.map(p => p.dataUri);
-    if (formItemId) {
-      // If this photo upload is tied to a specific checklist item
-      setValue(`checklistAnswers.${formItemId}` as const, uris);
-      // Also update the general photoDataUris if you want AI to see all photos
-      // This could lead to duplicates if not handled carefully
-      const existingGeneralPhotos = photoDataUris.filter(uri => !watchedFields.checklistAnswers?.[formItemId]?.includes(uri));
-      setPhotoDataUris([...existingGeneralPhotos, ...uris]);
+  // This handler is for PhotoUpload components within the form
+  const handleFormPhotosUploaded = (newlyUploadedPhotos: { name: string; dataUri: string }[], formItemId?: string) => {
+    const inspectionPhotos = newlyUploadedPhotos.map(p => ({...p, url: ''})); // url is placeholder
 
-    } else {
-      // General photo upload
-      setPhotoDataUris(uris);
+    if (formItemId) {
+      setValue(`checklistAnswers.${formItemId}` as const, inspectionPhotos.map(p => p.dataUri)); // Store URIs for checklist item
+      // Add to AI report and main photos list, avoiding duplicates if logic allows re-upload of same photo via different components
+      setAllPhotos(prev => [...prev.filter(ex => !inspectionPhotos.some(np => np.dataUri === ex.dataUri)), ...inspectionPhotos]);
+      setPhotoDataUrisForAI(prev => [...new Set([...prev, ...inspectionPhotos.map(p => p.dataUri)])]);
+    } else { // General photo upload within the form
+      setAllPhotos(prev => [...prev.filter(ex => !inspectionPhotos.some(np => np.dataUri === ex.dataUri)), ...inspectionPhotos]);
+      setPhotoDataUrisForAI(prev => [...new Set([...prev, ...inspectionPhotos.map(p => p.dataUri)])]);
     }
   };
+
 
   const handleReportGenerated = (summary: string) => {
     setValue('damageSummary', summary);
@@ -161,6 +174,7 @@ export function InspectionForm() {
     if (itemId.includes('transporter')) return <Users className="inline-block mr-2 h-5 w-5 text-muted-foreground" />;
     if (itemId.includes('business')) return <Briefcase className="inline-block mr-2 h-5 w-5 text-muted-foreground" />;
     if (itemId.includes('accessories')) return <StickyNote className="inline-block mr-2 h-5 w-5 text-muted-foreground" />;
+    if (itemId.includes('photo')) return <Camera className="inline-block mr-2 h-5 w-5 text-muted-foreground" />;
     return null;
   }
 
@@ -172,7 +186,6 @@ export function InspectionForm() {
     if (item.conditions) {
       const FULFILLED = item.conditions.every(condition => {
         const fieldValue = watchedFields.checklistAnswers?.[condition.field] || watchedFields[condition.field as keyof InspectionFormValues];
-        // Handle boolean condition for checkbox:
         if (typeof fieldValue === 'boolean' && typeof condition.value === 'string') {
             return (fieldValue ? 'Yes' : 'No') === condition.value;
         }
@@ -208,7 +221,8 @@ export function InspectionForm() {
                   )}
                 />
                 <label htmlFor={item.id} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                   Agree to terms
+                   {/* Default label for checkbox, consider making this part of ChecklistItem type */}
+                   Confirm
                 </label>
               </div>
             )}
@@ -249,8 +263,7 @@ export function InspectionForm() {
               />
             )}
             {item.type === 'photo' && (
-              // Pass item.id to link photos to this specific checklist item if needed
-              <PhotoUpload onPhotosUploaded={(photos) => handlePhotosUploaded(photos, item.id)} />
+              <PhotoUpload onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos, item.id)} />
             )}
           </>
         </FormControl>
@@ -310,8 +323,8 @@ export function InspectionForm() {
         
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle className="text-2xl font-semibold text-primary">General Notes & Overall Photos</CardTitle>
-            <CardDescription>Add any overall notes and upload general photos for the inspection (not tied to a specific damage). These will be used by the AI report.</CardDescription>
+            <CardTitle className="text-2xl font-semibold text-primary flex items-center gap-2"><Camera className="h-6 w-6" /> General Notes & Additional Photos</CardTitle>
+            <CardDescription>Add any overall notes and upload more general photos for the inspection (not tied to a specific damage). These will be used by the AI report. Initial photos are already included.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <FormField
@@ -327,15 +340,14 @@ export function InspectionForm() {
                 </FormItem>
               )}
             />
-            {/* General Photo Upload, not tied to a specific checklist item */}
-            <PhotoUpload onPhotosUploaded={(photos) => handlePhotosUploaded(photos)} maxFiles={10} />
+            <PhotoUpload onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos)} maxFiles={10} />
           </CardContent>
         </Card>
 
-        {(watchedFields.checklistAnswers?.['exterior_damage_present'] === 'Yes' || photoDataUris.length > 0) && (
+        {(watchedFields.checklistAnswers?.['exterior_damage_present'] === 'Yes' || photoDataUrisForAI.length > 0) && (
             <DamageReportSection
                 inspectionNotes={watchedFields.checklistAnswers?.['exterior_damage_details'] || watchedFields.generalNotes || ""}
-                photoDataUris={photoDataUris} // Pass all collected photo URIs
+                photoDataUris={photoDataUrisForAI} 
                 onReportGenerated={handleReportGenerated}
                 initialSummary={watchedFields.damageSummary}
             />
