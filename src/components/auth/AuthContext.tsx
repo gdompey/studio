@@ -4,8 +4,9 @@
 import type { User } from '@/types';
 import type { UserRole } from '@/lib/constants';
 import { USER_ROLES } from '@/lib/constants';
-import React, { createContext, useState, useEffect, ReactNode } from 'react';
-import { useRouter } from 'next/navigation'; // Corrected import
+import React, { createContext, useState, useEffect, ReactNode, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import AuthChildrenWrapper from './AuthChildrenWrapper'; // Re-added import
 
 interface AuthContextType {
   user: User | null;
@@ -13,7 +14,7 @@ interface AuthContextType {
   loading: boolean;
   signIn: (method: 'email' | 'google', credentials?: { email?: string; password?: string }) => Promise<void>;
   signOut: () => Promise<void>;
-  signUp?: (credentials: { email?: string; password?: string; name?: string }) => Promise<void>; // Optional for now
+  signUp?: (credentials: { email?: string; password?: string; name?: string }) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,7 +32,9 @@ const mockSignIn = async (method: 'email' | 'google', credentials?: { email?: st
       role: userRole,
       avatarUrl: `https://i.pravatar.cc/150?u=${credentials?.email || 'test.user'}`,
     };
-    localStorage.setItem('iasl-user', JSON.stringify(mockUser));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('iasl-user', JSON.stringify(mockUser));
+    }
     return mockUser;
   }
   throw new Error('Invalid credentials');
@@ -39,7 +42,9 @@ const mockSignIn = async (method: 'email' | 'google', credentials?: { email?: st
 
 const mockSignOut = async () => {
   await new Promise(resolve => setTimeout(resolve, 200));
-  localStorage.removeItem('iasl-user');
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('iasl-user');
+  }
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -55,7 +60,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(false);
   }, []);
 
-  const signIn = async (method: 'email' | 'google', credentials?: { email?: string; password?: string }) => {
+  const signIn = useCallback(async (method: 'email' | 'google', credentials?: { email?: string; password?: string }) => {
     setLoading(true);
     try {
       const signedInUser = await mockSignIn(method, credentials);
@@ -63,45 +68,50 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       router.push('/dashboard');
     } catch (error) {
       console.error("Sign in failed", error);
-      // Handle error (e.g., show toast)
       throw error;
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     setLoading(true);
     await mockSignOut();
     setUser(null);
     router.push('/auth/signin');
     setLoading(false);
-  };
+  }, [router]);
 
-  // Placeholder for sign up
-  const signUp = async (credentials: { email?: string; password?: string; name?: string }) => {
+  const signUp = useCallback(async (credentials: { email?: string; password?: string; name?: string }) => {
     setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API call
-    // In a real app, this would call your backend to create a user
-    // For this mock, we'll just log and then sign them in
-    console.log("Mock sign up with:", credentials);
+    await new Promise(resolve => setTimeout(resolve, 500)); 
     const newUser: User = {
       id: Date.now().toString(),
       email: credentials.email || 'new.user@example.com',
       name: credentials.name || 'New User',
-      role: USER_ROLES.INSPECTOR, // Default to inspector
+      role: USER_ROLES.INSPECTOR, 
       avatarUrl: `https://i.pravatar.cc/150?u=${credentials.email || 'new.user'}`,
     };
-    localStorage.setItem('iasl-user', JSON.stringify(newUser));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('iasl-user', JSON.stringify(newUser));
+    }
     setUser(newUser);
     router.push('/dashboard');
     setLoading(false);
-  };
+  }, [router]);
 
+  const contextValue = useMemo(() => ({
+    user,
+    role: user?.role || null,
+    loading,
+    signIn,
+    signOut,
+    signUp
+  }), [user, loading, signIn, signOut, signUp]);
 
   return (
-    <AuthContext.Provider value={{ user, role: user?.role || null, loading, signIn, signOut, signUp }}>
-      {children}
+    <AuthContext.Provider value={contextValue}>
+      <AuthChildrenWrapper>{children}</AuthChildrenWrapper> {/* Use the wrapper */}
     </AuthContext.Provider>
   );
 };
