@@ -204,7 +204,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
           {item.label} {item.required && <span className="text-destructive ml-1">*</span>}
         </FormLabel>
         <FormControl>
-          <>
+          <div>
             {item.type === 'text' && <Input {...formRegister(fieldName)} />}
             {item.type === 'textarea' && <Textarea {...formRegister(fieldName)} rows={3} />}
             {item.type === 'checkbox' && (
@@ -265,7 +265,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
             {item.type === 'photo' && (
               <PhotoUpload onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos, item.id)} />
             )}
-          </>
+          </div>
         </FormControl>
         <FormMessage>{form.formState.errors.checklistAnswers?.[item.id]?.message as React.ReactNode}</FormMessage>
       </FormItem>
@@ -390,3 +390,4 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
     </Form>
   );
 }
+
