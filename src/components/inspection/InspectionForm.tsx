@@ -16,11 +16,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { PhotoUpload } from './PhotoUpload';
 import { DamageReportSection } from './DamageReportSection';
 import { useAuth } from '@/hooks/useAuth';
-import type { ChecklistItem, InspectionData, InspectionPhoto } from '@/types';
+import type { ChecklistItem, InspectionData, InspectionPhoto as ClientInspectionPhoto } from '@/types';
 import { USER_ROLES } from '@/lib/constants';
 import { AlertCircle, CheckCircle, Loader2, FileOutput, ListChecks, Car, Truck, StickyNote, Fuel, UserCircle, Building, Users, Briefcase, Camera } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
+import { firestore, storage } from '@/lib/firebase/config';
+import { addDoc, collection } from 'firebase/firestore';
+import { ref, uploadString, getDownloadURL, uploadBytes } from 'firebase/storage';
 
 // Define a more comprehensive schema for the form
 const inspectionFormSchema = z.object({
@@ -68,9 +71,22 @@ const exampleChecklistItems: ChecklistItem[] = [
 ];
 
 interface InspectionFormProps {
-  initialPhotos?: InspectionPhoto[];
+  initialPhotos?: ClientInspectionPhoto[];
   initialLocation?: { latitude: number; longitude: number } | null;
 }
+
+// Helper to convert data URI to Blob
+function dataURIToBlob(dataURI: string): Blob {
+  const byteString = atob(dataURI.split(',')[1]);
+  const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  return new Blob([ab], { type: mimeString });
+}
+
 
 export function InspectionForm({ initialPhotos = [], initialLocation = null }: InspectionFormProps) {
   const { user, role } = useAuth();
@@ -78,10 +94,8 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   
-  // photoDataUris for AI report, initialized with initial photos and appended by PhotoUpload components
-  const [photoDataUrisForAI, setPhotoDataUrisForAI] = useState<string[]>(initialPhotos.map(p => p.dataUri));
-  // allPhotos for saving in InspectionData, includes initial and form-uploaded photos
-  const [allPhotos, setAllPhotos] = useState<InspectionPhoto[]>(initialPhotos);
+  const [photoDataUrisForAI, setPhotoDataUrisForAI] = useState<string[]>(initialPhotos.filter(p=>p.dataUri).map(p => p.dataUri!));
+  const [allClientPhotos, setAllClientPhotos] = useState<ClientInspectionPhoto[]>(initialPhotos);
 
 
   const form = useForm<InspectionFormValues>({
@@ -99,9 +113,8 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
   const watchedFields = watch();
 
   useEffect(() => {
-    // Update allPhotos if initialPhotos change (e.g. on re-render, though unlikely here)
-    setAllPhotos(initialPhotos);
-    setPhotoDataUrisForAI(initialPhotos.map(p => p.dataUri));
+    setAllClientPhotos(initialPhotos);
+    setPhotoDataUrisForAI(initialPhotos.filter(p=>p.dataUri).map(p => p.dataUri!));
   }, [initialPhotos]);
 
 
@@ -113,52 +126,90 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
       return;
     }
 
-    const inspectionData: InspectionData = {
-      id: Date.now().toString(), 
-      inspectorId: user.id,
-      inspectorName: user.name || user.email || "Unknown Inspector",
-      truckIdNo: data.truckIdNo,
-      truckRegNo: data.truckRegNo,
-      timestamp: new Date().toISOString(),
-      photos: allPhotos, // Use the consolidated list of all photos
-      notes: data.generalNotes,
-      checklistAnswers: data.checklistAnswers,
-      damageSummary: data.damageSummary,
-      latitude: initialLocation?.latitude,
-      longitude: initialLocation?.longitude,
-    };
+    try {
+      const inspectionsCollectionRef = collection(firestore, 'inspections');
+      // Add a placeholder document to get an ID for storage paths
+      const tempDocForId = await addDoc(inspectionsCollectionRef, { creating: true });
+      const inspectionId = tempDocForId.id;
 
-    console.log("Inspection Data to save:", inspectionData);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+      const uploadedPhotoMetadatas: Array<{ name: string; url: string }> = [];
 
-    toast({
-      title: "Inspection Saved!",
-      description: `Inspection for Truck ID ${data.truckIdNo} has been successfully recorded.`,
-      action: (
-        <Button variant="outline" size="sm" onClick={() => router.push(`/reports/${inspectionData.id}`)}>
-          View Report
-        </Button>
-      ),
-    });
-    
-    localStorage.setItem(`inspection-${inspectionData.id}`, JSON.stringify(inspectionData));
-    router.push(`/reports/${inspectionData.id}`);
-    
-    setIsLoading(false);
+      for (const clientPhoto of allClientPhotos) {
+        if (clientPhoto.dataUri && !clientPhoto.url.startsWith('https://firebasestorage.googleapis.com')) {
+          // Only upload if dataUri exists and it's not already a Firebase Storage URL
+          const photoBlob = dataURIToBlob(clientPhoto.dataUri);
+          const photoName = clientPhoto.name || `photo_${Date.now()}`;
+          const photoRef = ref(storage, `inspections/${inspectionId}/${photoName}`);
+          
+          await uploadBytes(photoRef, photoBlob);
+          const downloadURL = await getDownloadURL(photoRef);
+          uploadedPhotoMetadatas.push({ name: photoName, url: downloadURL });
+        } else if (clientPhoto.url.startsWith('https://firebasestorage.googleapis.com')) {
+          // If it's already a Firebase URL (e.g. from initialPhotos if editing), keep it
+           uploadedPhotoMetadatas.push({ name: clientPhoto.name, url: clientPhoto.url });
+        }
+      }
+      
+      // Delete the temporary document used for ID generation
+      // await deleteDoc(tempDocForId); // No, we update it. Or rather, we should use setDoc with the ID.
+      // Let's use addDoc and then get the ID for storage paths, then prepare final data.
+      // For simplicity, it's easier to create a new doc with full data later.
+      // The above approach of tempDocForId is okay for getting an ID first.
+      // Or, let's generate ID client side for storage path predictability, then use setDoc.
+      // const inspectionId = Date.now().toString(); // Simpler ID for now
+
+      const inspectionDataToSave: Omit<InspectionData, 'id'> = { // Firestore will generate ID if we use addDoc
+        inspectorId: user.id,
+        inspectorName: user.name || user.email || "Unknown Inspector",
+        truckIdNo: data.truckIdNo.toUpperCase(),
+        truckRegNo: data.truckRegNo.toUpperCase(),
+        timestamp: new Date().toISOString(),
+        photos: uploadedPhotoMetadatas,
+        notes: data.generalNotes,
+        checklistAnswers: data.checklistAnswers,
+        damageSummary: data.damageSummary,
+        latitude: initialLocation?.latitude,
+        longitude: initialLocation?.longitude,
+      };
+      
+      // Save the final inspection data
+      const docRef = await addDoc(collection(firestore, "inspections"), inspectionDataToSave);
+
+
+      toast({
+        title: "Inspection Saved!",
+        description: `Inspection for Truck ID ${data.truckIdNo} has been successfully recorded in Firebase.`,
+        action: (
+          <Button variant="outline" size="sm" onClick={() => router.push(`/reports/${docRef.id}`)}>
+            View Report
+          </Button>
+        ),
+      });
+      
+      router.push(`/reports/${docRef.id}`);
+
+    } catch (error) {
+      console.error("Error saving inspection:", error);
+      toast({
+        title: "Save Failed",
+        description: (error as Error).message || "Could not save inspection to Firebase.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
   
-  // This handler is for PhotoUpload components within the form
   const handleFormPhotosUploaded = (newlyUploadedPhotos: { name: string; dataUri: string }[], formItemId?: string) => {
-    const inspectionPhotos = newlyUploadedPhotos.map(p => ({...p, url: ''})); // url is placeholder
+    const clientPhotos: ClientInspectionPhoto[] = newlyUploadedPhotos.map(p => ({...p, url: '' })); // url is placeholder
 
     if (formItemId) {
-      setValue(`checklistAnswers.${formItemId}` as const, inspectionPhotos.map(p => p.dataUri)); // Store URIs for checklist item
-      // Add to AI report and main photos list, avoiding duplicates if logic allows re-upload of same photo via different components
-      setAllPhotos(prev => [...prev.filter(ex => !inspectionPhotos.some(np => np.dataUri === ex.dataUri)), ...inspectionPhotos]);
-      setPhotoDataUrisForAI(prev => [...new Set([...prev, ...inspectionPhotos.map(p => p.dataUri)])]);
-    } else { // General photo upload within the form
-      setAllPhotos(prev => [...prev.filter(ex => !inspectionPhotos.some(np => np.dataUri === ex.dataUri)), ...inspectionPhotos]);
-      setPhotoDataUrisForAI(prev => [...new Set([...prev, ...inspectionPhotos.map(p => p.dataUri)])]);
+      setValue(`checklistAnswers.${formItemId}` as const, clientPhotos.map(p => p.dataUri)); 
+      setAllClientPhotos(prev => [...prev.filter(ex => !clientPhotos.some(np => np.dataUri === ex.dataUri)), ...clientPhotos]);
+      setPhotoDataUrisForAI(prev => [...new Set([...prev, ...clientPhotos.map(p => p.dataUri!)])]);
+    } else { 
+      setAllClientPhotos(prev => [...prev.filter(ex => !clientPhotos.some(np => np.dataUri === ex.dataUri)), ...clientPhotos]);
+      setPhotoDataUrisForAI(prev => [...new Set([...prev, ...clientPhotos.map(p => p.dataUri!)])]);
     }
   };
 
@@ -204,7 +255,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
           {item.label} {item.required && <span className="text-destructive ml-1">*</span>}
         </FormLabel>
         <FormControl>
-          <div>
+          <div> {/* Ensure FormControl has a single direct child that can accept props */}
             {item.type === 'text' && <Input {...formRegister(fieldName)} />}
             {item.type === 'textarea' && <Textarea {...formRegister(fieldName)} rows={3} />}
             {item.type === 'checkbox' && (
@@ -214,14 +265,13 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
                   control={control}
                   render={({ field }) => (
                     <Checkbox
-                      id={item.id}
+                      id={item.id} // id for label association
                       checked={field.value || false}
                       onCheckedChange={field.onChange}
                     />
                   )}
                 />
                 <label htmlFor={item.id} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                   {/* Default label for checkbox, consider making this part of ChecklistItem type */}
                    Confirm
                 </label>
               </div>
@@ -390,4 +440,3 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
     </Form>
   );
 }
-

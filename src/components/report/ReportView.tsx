@@ -1,7 +1,7 @@
 // src/components/report/ReportView.tsx
 "use client";
 
-import type { InspectionData } from '@/types';
+import type { InspectionData, InspectionPhoto as ClientInspectionPhoto } from '@/types'; // ClientInspectionPhoto may include dataUri
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +10,7 @@ import { User, CalendarDays, Truck, FileText, ShieldCheck, Camera, StickyNote, W
 import { APP_NAME } from '@/lib/constants';
 
 interface ReportViewProps {
-  reportData: InspectionData;
+  reportData: InspectionData; // This is Firestore data, photos are {name, url}
 }
 
 export function ReportView({ reportData }: ReportViewProps) {
@@ -21,7 +21,7 @@ export function ReportView({ reportData }: ReportViewProps) {
     truckIdNo,
     truckRegNo,
     timestamp,
-    photos,
+    photos, // This is Array<{ name: string; url: string; }>
     notes,
     checklistAnswers,
     damageSummary,
@@ -47,6 +47,15 @@ export function ReportView({ reportData }: ReportViewProps) {
       {children && <div className="col-span-2">{children}</div>}
     </div>
   );
+
+  // Prepare photos for display. ReportView receives Firestore data.
+  // ClientInspectionPhoto type is used here for compatibility if we were to also handle dataUris,
+  // but for Firebase stored data, we only have 'url'.
+  const displayPhotos: ClientInspectionPhoto[] = photos.map(p => ({
+    name: p.name,
+    url: p.url, // This is the Firebase Storage URL
+    // dataUri is not available from Firestore, Image component will use `url`
+  }));
 
   return (
     <Card className="max-w-4xl mx-auto p-4 sm:p-8 shadow-xl print:shadow-none print:border-none">
@@ -99,9 +108,10 @@ export function ReportView({ reportData }: ReportViewProps) {
                     {value ? 'Yes' : 'No'}
                   </Badge>
                 ) : Array.isArray(value) && value.every(item => typeof item === 'string' && item.startsWith('data:image')) ? (
+                  // This case handles checklist items that might store data URIs (e.g., specific damage photos from checklist)
                   <span>{value.length} photo(s) uploaded for this item</span>
                 ) : Array.isArray(value) && value.every(item => typeof item === 'string') ? (
-                     <span>{value.join(', ') || 'N/A'}</span> // Handles array of strings, like photo URIs for a checklist item
+                     <span>{value.join(', ') || 'N/A'}</span>
                 ) : (
                   <span className="text-foreground">{String(value) || 'N/A'}</span>
                 )}
@@ -124,13 +134,13 @@ export function ReportView({ reportData }: ReportViewProps) {
           </Section>
         )}
 
-        {photos && photos.length > 0 && (
+        {displayPhotos && displayPhotos.length > 0 && (
           <Section title="Inspection Photos" icon={Camera}>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 print:grid-cols-2">
-              {photos.map((photo, index) => (
+              {displayPhotos.map((photo, index) => (
                 <div key={index} className="border rounded-md overflow-hidden shadow-sm aspect-video print:aspect-auto print:h-40">
                   <Image
-                    src={photo.dataUri || photo.url} 
+                    src={photo.url} // Use the Firebase Storage URL directly
                     alt={photo.name || `Inspection Photo ${index + 1}`}
                     width={300}
                     height={200}

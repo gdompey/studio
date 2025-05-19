@@ -4,7 +4,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { FileText, PlusCircle, Search, Truck } from 'lucide-react';
+import { FileText, PlusCircle, Search, Truck, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -17,52 +17,65 @@ import {
 import { Badge } from '@/components/ui/badge';
 import type { InspectionData } from '@/types';
 import { useEffect, useState } from 'react';
-
-// Mock data - in a real app, this would come from an API
-const getMockInspections = (): InspectionData[] => {
-  const inspections: InspectionData[] = [];
-  for (let i = 1; i <= 5; i++) {
-    const id = `mock-id-${i}`;
-    const stored = typeof window !== 'undefined' ? localStorage.getItem(`inspection-${id}`) : null;
-    if (stored) {
-      inspections.push(JSON.parse(stored));
-    } else {
-      // Create some default mock data if not found in localStorage
-      inspections.push({
-        id: id,
-        inspectorId: `inspector-${i}`,
-        inspectorName: `Inspector ${i}`,
-        truckIdNo: `TRUCKIDMOCK00${i}`, 
-        truckRegNo: `REGNO00${i}`, 
-        timestamp: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString(),
-        photos: [
-          { name: `initial_photo_mock_${i}.jpg`, url: `https://picsum.photos/seed/${id}_truck/300/200`, dataUri: `https://picsum.photos/seed/${id}_truck_data/300/200` }
-        ],
-        notes: `This is a mock inspection note for truck ${i}.`,
-        checklistAnswers: { exterior_damage_present: i % 2 === 0 ? 'Yes' : 'No', fuel_quantity: '1/2 Tank' },
-        damageSummary: i % 2 === 0 ? `Some damage noted on truck ${i}.` : undefined,
-        latitude: 34.0522 + (Math.random() - 0.5) * 0.1, // Mock LA coordinates
-        longitude: -118.2437 + (Math.random() - 0.5) * 0.1,
-      });
-    }
-  }
-  return inspections.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-};
+import { firestore } from '@/lib/firebase/config';
+import { collection, getDocs, query, orderBy, where, or } from 'firebase/firestore';
+import { useAuth } from '@/hooks/useAuth';
+import { USER_ROLES } from '@/lib/constants';
 
 
 export default function InspectionsListPage() {
+  const { user, role } = useAuth();
   const [inspections, setInspections] = useState<InspectionData[]>([]);
+  const [filteredInspections, setFilteredInspections] = useState<InspectionData[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setInspections(getMockInspections());
-  }, []);
+    const fetchInspections = async () => {
+      if (!user) return;
+      setLoading(true);
+      try {
+        const inspectionsCollectionRef = collection(firestore, 'inspections');
+        let q;
+        if (role === USER_ROLES.ADMIN) {
+          q = query(inspectionsCollectionRef, orderBy('timestamp', 'desc'));
+        } else {
+          // Inspectors only see their own inspections
+          q = query(inspectionsCollectionRef, where('inspectorId', '==', user.id), orderBy('timestamp', 'desc'));
+        }
+        
+        const querySnapshot = await getDocs(q);
+        const fetchedInspections: InspectionData[] = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...(doc.data() as Omit<InspectionData, 'id'>),
+        }));
+        setInspections(fetchedInspections);
+        setFilteredInspections(fetchedInspections);
+      } catch (error) {
+        console.error("Error fetching inspections:", error);
+        // Handle error (e.g., show toast)
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInspections();
+  }, [user, role]);
   
-  const filteredInspections = inspections.filter(inspection => 
-    inspection.truckIdNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    inspection.truckRegNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    inspection.inspectorName?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  useEffect(() => {
+    if (!searchTerm) {
+      setFilteredInspections(inspections);
+      return;
+    }
+    const lowerSearchTerm = searchTerm.toLowerCase();
+    setFilteredInspections(
+      inspections.filter(inspection => 
+        inspection.truckIdNo.toLowerCase().includes(lowerSearchTerm) ||
+        inspection.truckRegNo.toLowerCase().includes(lowerSearchTerm) ||
+        (inspection.inspectorName && inspection.inspectorName.toLowerCase().includes(lowerSearchTerm))
+      )
+    );
+  }, [searchTerm, inspections]);
 
   return (
     <div className="space-y-6">
@@ -76,12 +89,14 @@ export default function InspectionsListPage() {
             Browse, search, and manage all truck inspections.
           </p>
         </div>
+        { role === USER_ROLES.INSPECTOR && (
         <Button asChild className="bg-accent hover:bg-accent/90 text-accent-foreground">
           <Link href="/inspections/new">
             <PlusCircle className="mr-2 h-4 w-4" />
             New Inspection
           </Link>
         </Button>
+        )}
       </div>
 
       <Card className="shadow-lg">
@@ -97,7 +112,11 @@ export default function InspectionsListPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {filteredInspections.length > 0 ? (
+          {loading ? (
+            <div className="flex justify-center items-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : filteredInspections.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>

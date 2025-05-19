@@ -26,22 +26,22 @@ export interface ChecklistItem {
 
 export interface InspectionPhoto {
   name: string;
-  url: string; // Could be a signed URL for cloud storage, or a placeholder
-  dataUri: string; // Base64 data URI, primarily for client-side use (AI, display)
+  url: string; // Firebase Storage download URL after upload. Initially can be empty or placeholder.
+  dataUri?: string; // Base64 data URI, for client-side preview/processing before upload. Optional after upload.
 }
 
+// Represents the data structure stored in Firestore
 export interface InspectionData {
-  id: string;
+  id: string; // Firestore document ID
   inspectorId: string;
   inspectorName?: string;
-  truckIdNo: string; // Renamed from vin
-  truckRegNo: string; // Added
-  timestamp: string;
-  photos: InspectionPhoto[];
+  truckIdNo: string;
+  truckRegNo: string;
+  timestamp: string; // ISO string
+  photos: Array<{ name: string; url: string; }>; // Only store name and Firebase Storage URL
   notes?: string;
   checklistAnswers: Record<string, any>;
   damageSummary?: string;
   latitude?: number;
   longitude?: number;
 }
-

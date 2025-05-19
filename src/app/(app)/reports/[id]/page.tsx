@@ -7,6 +7,8 @@ import { ReportView } from '@/components/report/ReportView';
 import type { InspectionData } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Printer, AlertTriangle, Loader2 } from 'lucide-react';
+import { firestore } from '@/lib/firebase/config';
+import { doc, getDoc } from 'firebase/firestore';
 
 export default function ReportPage() {
   const params = useParams();
@@ -17,21 +19,26 @@ export default function ReportPage() {
 
   useEffect(() => {
     if (reportId) {
-      setLoading(true);
-      try {
-        // Simulate fetching data from localStorage (replace with API call in real app)
-        const storedData = localStorage.getItem(`inspection-${reportId}`);
-        if (storedData) {
-          setReportData(JSON.parse(storedData));
-        } else {
-          setError(`Report with ID ${reportId} not found.`);
+      const fetchReport = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const reportDocRef = doc(firestore, 'inspections', reportId);
+          const docSnap = await getDoc(reportDocRef);
+
+          if (docSnap.exists()) {
+            setReportData({ id: docSnap.id, ...docSnap.data() } as InspectionData);
+          } else {
+            setError(`Report with ID ${reportId} not found.`);
+          }
+        } catch (e) {
+          setError("Failed to load report data from Firebase.");
+          console.error(e);
+        } finally {
+          setLoading(false);
         }
-      } catch (e) {
-        setError("Failed to load report data.");
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
+      };
+      fetchReport();
     }
   }, [reportId]);
 
