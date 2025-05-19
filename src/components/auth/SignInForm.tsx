@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Mail, KeyRound, LogIn } from 'lucide-react'; // LogIn for Google
+import type { FirebaseError } from 'firebase/app'; // Import FirebaseError for type checking
 
 const signInSchema = z.object({
   email: z.string().email({ message: 'Invalid email address' }),
@@ -51,14 +52,23 @@ export function SignInForm() {
   const handleGoogleSignIn = async () => {
     setFormLoading(true);
     try {
-      await signIn('google'); // No credentials needed for mock Google sign-in
+      await signIn('google');
       toast({ title: 'Signed in with Google successfully!' });
     } catch (error) {
-      toast({
-        title: 'Google sign in failed',
-        description: (error as Error).message || 'An error occurred. Please try again.',
-        variant: 'destructive',
-      });
+      const firebaseError = error as FirebaseError;
+      if (firebaseError.code === 'auth/popup-closed-by-user') {
+        toast({
+          title: 'Google Sign-In Cancelled',
+          description: 'You closed the Google Sign-In window before completing the process.',
+          variant: 'default', // Or 'destructive' if you prefer
+        });
+      } else {
+        toast({
+          title: 'Google sign in failed',
+          description: firebaseError.message || 'An error occurred. Please try again.',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setFormLoading(false);
     }
