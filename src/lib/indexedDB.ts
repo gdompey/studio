@@ -4,15 +4,15 @@ import { openDB } from 'idb';
 import type { InspectionData, InspectionPhoto } from '@/types';
 
 const DB_NAME = 'iasl-ec-manager-db';
-const DB_VERSION = 1;
+const DB_VERSION = 1; // If schema changes, version must be incremented. Let's keep it 1 for now as this is a data type change within the existing schema structure.
 const INSPECTIONS_STORE_NAME = 'inspections';
 
 // Define the local version of InspectionData for IndexedDB
-export interface LocalInspectionData extends Omit<InspectionData, 'id' | 'photos'> {
+export interface LocalInspectionData extends Omit<InspectionData, 'id' | 'photos' | 'needsSync'> {
   localId: string; // Client-generated ID for offline items
   id?: string; // Firestore ID, populated after sync
   photos: Array<InspectionPhoto>; // Will store dataUris for offline photos
-  needsSync: boolean;
+  needsSync: number; // 0 for false, 1 for true
   timestamp: string; // Ensure timestamp is always string
 }
 
@@ -20,7 +20,7 @@ interface IASLDB extends DBSchema {
   [INSPECTIONS_STORE_NAME]: {
     key: string; // localId
     value: LocalInspectionData;
-    indexes: { 'needsSync': boolean, 'timestamp': string };
+    indexes: { 'needsSync': number, 'timestamp': string }; // Changed boolean to number
   };
 }
 
@@ -33,9 +33,11 @@ const getDb = (): Promise<IDBPDatabase<IASLDB>> => {
         console.log(`Upgrading DB from version ${oldVersion} to ${newVersion}`);
         if (!db.objectStoreNames.contains(INSPECTIONS_STORE_NAME)) {
           const store = db.createObjectStore(INSPECTIONS_STORE_NAME, { keyPath: 'localId' });
-          store.createIndex('needsSync', 'needsSync');
+          store.createIndex('needsSync', 'needsSync'); // Index type matches the field type (number)
           store.createIndex('timestamp', 'timestamp');
         }
+        // If DB_VERSION is incremented due to this change, you might need migration logic here if existing data used booleans.
+        // For now, assuming new setup or manual clearing if issues arise from type mismatch on existing data.
       },
     });
   }
@@ -43,13 +45,13 @@ const getDb = (): Promise<IDBPDatabase<IASLDB>> => {
 };
 
 
-export async function saveInspectionOffline(inspectionData: Omit<LocalInspectionData, 'needsSync'>): Promise<string> {
+export async function saveInspectionOffline(inspectionData: Omit<LocalInspectionData, 'needsSync' | 'localId'> & {localId?: string}): Promise<string> {
   const db = await getDb();
   const localId = inspectionData.localId || `offline_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   const dataToSave: LocalInspectionData = {
     ...inspectionData,
     localId,
-    needsSync: true,
+    needsSync: 1, // Store 1 for true
     timestamp: inspectionData.timestamp || new Date().toISOString(), // Ensure timestamp
   };
   await db.put(INSPECTIONS_STORE_NAME, dataToSave);
@@ -69,17 +71,15 @@ export async function getInspectionByIdOffline(localId: string): Promise<LocalIn
 
 export async function getInspectionsToSync(): Promise<LocalInspectionData[]> {
   const db = await getDb();
-  return db.getAllFromIndex(INSPECTIONS_STORE_NAME, 'needsSync', IDBKeyRange.only(true as any));
+  return db.getAllFromIndex(INSPECTIONS_STORE_NAME, 'needsSync', IDBKeyRange.only(1)); // Query for 1 (true)
 }
 
 export async function markInspectionSynced(localId: string, firestoreId: string): Promise<void> {
   const db = await getDb();
   const inspection = await db.get(INSPECTIONS_STORE_NAME, localId);
   if (inspection) {
-    inspection.needsSync = false;
+    inspection.needsSync = 0; // Store 0 for false
     inspection.id = firestoreId; // Store the Firestore ID
-    // Optionally, clear large data like photo dataUris if they are no longer needed locally
-    // inspection.photos.forEach(p => delete p.dataUri);
     await db.put(INSPECTIONS_STORE_NAME, inspection);
   }
 }

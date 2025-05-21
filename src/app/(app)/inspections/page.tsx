@@ -30,8 +30,8 @@ export default function InspectionsListPage() {
   const isOnline = useOnlineStatus();
   const { toast } = useToast();
 
-  const [inspections, setInspections] = useState<InspectionData[]>([]); // Combined list
-  const [filteredInspections, setFilteredInspections] = useState<InspectionData[]>([]);
+  const [inspections, setInspections] = useState<Array<InspectionData | LocalInspectionData>>([]); // Combined list
+  const [filteredInspections, setFilteredInspections] = useState<Array<InspectionData | LocalInspectionData>>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -40,7 +40,7 @@ export default function InspectionsListPage() {
       if (!user) return;
       setLoading(true);
       let fetchedOnlineInspections: InspectionData[] = [];
-      let fetchedOfflineInspections: InspectionData[] = [];
+      let fetchedOfflineInspections: LocalInspectionData[] = [];
 
       if (isOnline) {
         try {
@@ -55,7 +55,6 @@ export default function InspectionsListPage() {
           fetchedOnlineInspections = querySnapshot.docs.map(doc => ({
             id: doc.id,
             ...(doc.data() as Omit<InspectionData, 'id'>),
-            // Convert Firestore Timestamp to string if necessary, or ensure consistent type
              timestamp: (doc.data().timestamp as any)?.toDate ? (doc.data().timestamp as any).toDate().toISOString() : doc.data().timestamp,
           }));
         } catch (error) {
@@ -67,22 +66,24 @@ export default function InspectionsListPage() {
       try {
         const offlineData: LocalInspectionData[] = await getOfflineInspections();
         fetchedOfflineInspections = offlineData
-            .filter(item => role === USER_ROLES.ADMIN || item.inspectorId === user.id) // Filter by inspector for non-admins
-            .map(item => ({
-                ...item,
-                id: item.localId, // Use localId as the primary ID for offline items not yet synced
-                // Ensure photos are in the correct format for InspectionData
-                photos: item.photos.map(p => ({ name: p.name, url: p.dataUri || p.url || '' })), 
-            }));
+            .filter(item => role === USER_ROLES.ADMIN || item.inspectorId === user.id);
       } catch (error) {
         console.error("Error fetching offline inspections:", error);
         toast({ variant: "destructive", title: "Local Data Error", description: "Could not load local inspections." });
       }
       
-      // Merge and deduplicate, prioritizing online data if localId matches an online record's localId field
-      const combinedMap = new Map<string, InspectionData>();
-      fetchedOfflineInspections.forEach(item => combinedMap.set(item.localId || item.id, { ...item, needsSync: item.needsSync ?? true }));
-      fetchedOnlineInspections.forEach(item => combinedMap.set(item.localId || item.id, { ...item, needsSync: false })); // Online items don't need sync
+      const combinedMap = new Map<string, InspectionData | LocalInspectionData>();
+      // Add offline items first, potentially marking them for sync view
+      fetchedOfflineInspections.forEach(item => {
+        combinedMap.set(item.localId, { ...item }); 
+      });
+      // Add online items, overwriting if a localId matches (meaning it's synced)
+      // Or add if it's a new online-only item
+      fetchedOnlineInspections.forEach(item => {
+        const key = item.localId || item.id; // Prioritize localId for matching, then firestore id
+        combinedMap.set(key, { ...item, needsSync: 0 }); // Synced items have needsSync = 0
+      });
+
 
       const combinedInspections = Array.from(combinedMap.values()).sort((a, b) => 
         new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -164,14 +165,19 @@ export default function InspectionsListPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredInspections.map((inspection) => (
-                  <TableRow key={inspection.id || inspection.localId}>
+                {filteredInspections.map((inspection) => {
+                  // Determine if it's a LocalInspectionData or InspectionData for needsSync
+                  const needsSync = 'needsSync' in inspection ? inspection.needsSync === 1 : (inspection as InspectionData).needsSync === true;
+                  const displayId = 'localId' in inspection && inspection.localId ? inspection.localId : inspection.id;
+
+                  return (
+                  <TableRow key={displayId}>
                     <TableCell className="font-medium">{inspection.truckIdNo}</TableCell>
                     <TableCell>{inspection.truckRegNo}</TableCell>
                     <TableCell>{inspection.inspectorName || inspection.inspectorId}</TableCell>
                     <TableCell>{new Date(inspection.timestamp).toLocaleDateString()}</TableCell>
                     <TableCell>
-                      {inspection.needsSync ? (
+                      {needsSync ? (
                         <Badge variant="outline" className="border-orange-500 text-orange-600">
                           <CloudOff className="mr-1 h-3 w-3" /> Pending Sync
                         </Badge>
@@ -183,12 +189,11 @@ export default function InspectionsListPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <Button asChild variant="outline" size="sm">
-                        {/* Link to report using Firestore ID if synced, localId otherwise */}
-                        <Link href={`/reports/${inspection.id.startsWith('offline_') ? inspection.localId : inspection.id}`}>View Report</Link>
+                        <Link href={`/reports/${displayId}`}>View Report</Link>
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))}
+                )})}
               </TableBody>
             </Table>
           ) : (
