@@ -1,10 +1,11 @@
+
 // src/app/(app)/inspections/page.tsx
 "use client";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { FileText, PlusCircle, Search, Truck, Loader2, CloudOff } from 'lucide-react';
+import { FileText, PlusCircle, Search, Truck, Loader2, CloudOff, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -18,22 +19,27 @@ import { Badge } from '@/components/ui/badge';
 import type { InspectionData } from '@/types';
 import { useEffect, useState } from 'react';
 import { firestore } from '@/lib/firebase/config';
-import { collection, getDocs, query, orderBy, where, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore'; // Removed 'where'
 import { useAuth } from '@/hooks/useAuth';
 import { USER_ROLES } from '@/lib/constants';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { getOfflineInspections, type LocalInspectionData } from '@/lib/indexedDB';
 import { useToast } from '@/hooks/use-toast';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 
 export default function InspectionsListPage() {
   const { user, role } = useAuth();
   const isOnline = useOnlineStatus();
   const { toast } = useToast();
 
-  const [inspections, setInspections] = useState<Array<InspectionData | LocalInspectionData>>([]); // Combined list
+  const [inspections, setInspections] = useState<Array<InspectionData | LocalInspectionData>>([]);
   const [filteredInspections, setFilteredInspections] = useState<Array<InspectionData | LocalInspectionData>>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     const fetchInspections = async () => {
@@ -45,12 +51,9 @@ export default function InspectionsListPage() {
       if (isOnline) {
         try {
           const inspectionsCollectionRef = collection(firestore, 'inspections');
-          let q;
-          if (role === USER_ROLES.ADMIN) {
-            q = query(inspectionsCollectionRef, orderBy('timestamp', 'desc'));
-          } else {
-            q = query(inspectionsCollectionRef, where('inspectorId', '==', user.id), orderBy('timestamp', 'desc'));
-          }
+          // Fetch all inspections, ordered by timestamp for all roles
+          const q = query(inspectionsCollectionRef, orderBy('timestamp', 'desc'));
+          
           const querySnapshot = await getDocs(q);
           fetchedOnlineInspections = querySnapshot.docs.map(doc => ({
             id: doc.id,
@@ -65,25 +68,21 @@ export default function InspectionsListPage() {
 
       try {
         const offlineData: LocalInspectionData[] = await getOfflineInspections();
-        fetchedOfflineInspections = offlineData
-            .filter(item => role === USER_ROLES.ADMIN || item.inspectorId === user.id);
+        // Show all offline inspections to all users
+        fetchedOfflineInspections = offlineData;
       } catch (error) {
         console.error("Error fetching offline inspections:", error);
         toast({ variant: "destructive", title: "Local Data Error", description: "Could not load local inspections." });
       }
       
       const combinedMap = new Map<string, InspectionData | LocalInspectionData>();
-      // Add offline items first, potentially marking them for sync view
       fetchedOfflineInspections.forEach(item => {
         combinedMap.set(item.localId, { ...item }); 
       });
-      // Add online items, overwriting if a localId matches (meaning it's synced)
-      // Or add if it's a new online-only item
       fetchedOnlineInspections.forEach(item => {
-        const key = item.localId || item.id; // Prioritize localId for matching, then firestore id
-        combinedMap.set(key, { ...item, needsSync: 0 }); // Synced items have needsSync = 0
+        const key = item.localId || item.id;
+        combinedMap.set(key, { ...item, needsSync: item.needsSync === true ? 1 : 0 });
       });
-
 
       const combinedInspections = Array.from(combinedMap.values()).sort((a, b) => 
         new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -91,6 +90,7 @@ export default function InspectionsListPage() {
       
       setInspections(combinedInspections);
       setFilteredInspections(combinedInspections);
+      setCurrentPage(1); // Reset to first page on new data fetch
       setLoading(false);
     };
 
@@ -98,6 +98,7 @@ export default function InspectionsListPage() {
   }, [user, role, isOnline, toast]);
   
   useEffect(() => {
+    setCurrentPage(1); // Reset to first page on search term change
     if (!searchTerm) {
       setFilteredInspections(inspections);
       return;
@@ -111,6 +112,24 @@ export default function InspectionsListPage() {
       )
     );
   }, [searchTerm, inspections]);
+
+  const totalPages = Math.ceil(filteredInspections.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedInspections = filteredInspections.slice(startIndex, endIndex);
+
+  const handleItemsPerPageChange = (value: string) => {
+      setItemsPerPage(Number(value));
+      setCurrentPage(1); 
+  };
+
+  const goToNextPage = () => {
+      setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+  };
+
+  const goToPreviousPage = () => {
+      setCurrentPage((prev) => Math.max(prev - 1, 1));
+  };
 
   return (
     <div className="space-y-6">
@@ -136,14 +155,29 @@ export default function InspectionsListPage() {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex items-center space-x-2">
-            <Search className="h-5 w-5 text-muted-foreground" />
-            <Input 
-              placeholder="Search by Truck ID, Reg No, or Inspector..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="max-w-sm"
-            />
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div className="flex items-center space-x-2">
+              <Search className="h-5 w-5 text-muted-foreground" />
+              <Input 
+                placeholder="Search by Truck ID, Reg No, or Inspector..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="max-w-sm"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Label htmlFor="items-per-page-select" className="text-sm text-muted-foreground whitespace-nowrap">Items per page:</Label>
+              <Select value={String(itemsPerPage)} onValueChange={handleItemsPerPageChange}>
+                <SelectTrigger id="items-per-page-select" className="w-[80px]">
+                  <SelectValue placeholder={itemsPerPage} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                  <SelectItem value="200">200</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -152,7 +186,8 @@ export default function InspectionsListPage() {
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
               <p className="ml-2">Loading inspections...</p>
             </div>
-          ) : filteredInspections.length > 0 ? (
+          ) : paginatedInspections.length > 0 ? (
+            <>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -165,8 +200,7 @@ export default function InspectionsListPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredInspections.map((inspection) => {
-                  // Determine if it's a LocalInspectionData or InspectionData for needsSync
+                {paginatedInspections.map((inspection) => {
                   const needsSync = 'needsSync' in inspection ? inspection.needsSync === 1 : (inspection as InspectionData).needsSync === true;
                   const displayId = 'localId' in inspection && inspection.localId ? inspection.localId : inspection.id;
 
@@ -196,6 +230,32 @@ export default function InspectionsListPage() {
                 )})}
               </TableBody>
             </Table>
+             <div className="flex items-center justify-between pt-4">
+                <span className="text-sm text-muted-foreground">
+                  Page {currentPage} of {totalPages} ({filteredInspections.length} total inspections)
+                </span>
+                <div className="space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToPreviousPage}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="mr-1 h-4 w-4" />
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToNextPage}
+                    disabled={currentPage === totalPages || totalPages === 0}
+                  >
+                    Next
+                    <ChevronRight className="ml-1 h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </>
           ) : (
             <p className="text-center text-muted-foreground py-8">
               No inspections found matching your criteria.
@@ -206,3 +266,4 @@ export default function InspectionsListPage() {
     </div>
   );
 }
+
