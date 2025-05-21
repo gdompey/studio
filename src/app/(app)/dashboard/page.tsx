@@ -1,3 +1,4 @@
+
 // src/app/(app)/dashboard/page.tsx
 "use client";
 
@@ -7,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { 
-  FilePlus2, Eye, BarChart3, ListChecks, CheckCircle, AlertTriangle, CloudOff, Loader2, UserCircle, Truck, CalendarDays
+  FilePlus2, Eye, BarChart3, ListChecks, CheckCircle, AlertTriangle, CloudOff, Loader2, UserCircle, Truck, CalendarDays, Filter, Building
 } from 'lucide-react';
 import { USER_ROLES } from '@/lib/constants';
 import type { InspectionData, LocalInspectionData } from '@/types';
@@ -18,6 +19,9 @@ import { getOfflineInspections } from '@/lib/indexedDB';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { startOfDay, isToday, isAfter, subDays } from 'date-fns';
 
 interface DashboardStats {
   total: number;
@@ -26,18 +30,30 @@ interface DashboardStats {
   pendingSync: number;
 }
 
+const dateFilterOptions = [
+  { value: 'all', label: 'All Time' },
+  { value: 'today', label: 'Today' },
+  { value: 'last7days', label: 'Last 7 Days' },
+  { value: 'last30days', label: 'Last 30 Days' },
+];
+
 export default function DashboardPage() {
   const { user, role } = useAuth();
   const isOnline = useOnlineStatus();
   const { toast } = useToast();
 
-  const [inspections, setInspections] = useState<Array<InspectionData | LocalInspectionData>>([]);
+  const [allInspections, setAllInspections] = useState<Array<InspectionData | LocalInspectionData>>([]);
+  const [processedInspections, setProcessedInspections] = useState<Array<InspectionData | LocalInspectionData>>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentInspections, setRecentInspections] = useState<Array<InspectionData | LocalInspectionData>>([]);
+  
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string>('all');
+  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState<string>('all');
+  const [availableCompanies, setAvailableCompanies] = useState<string[]>([]);
 
 
-  const fetchInspectionsAndStats = useCallback(async () => {
+  const fetchAllInspectionsData = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     let fetchedOnlineInspections: InspectionData[] = [];
@@ -82,34 +98,80 @@ export default function DashboardPage() {
       combinedMap.set(keyForMap, { ...item, needsSync: item.needsSync === true ? 1 : 0 });
     });
 
-    const combinedInspections = Array.from(combinedMap.values()).sort((a, b) => 
+    const combined = Array.from(combinedMap.values()).sort((a, b) => 
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
     
-    setInspections(combinedInspections);
+    setAllInspections(combined);
 
-    // Calculate stats
-    const total = combinedInspections.length;
-    const released = combinedInspections.filter(insp => insp.isReleased).length;
-    const damageReported = combinedInspections.filter(insp => insp.damageSummary && insp.damageSummary.trim() !== "").length;
-    const pendingSync = combinedInspections.filter(insp => (insp as LocalInspectionData).needsSync === 1).length;
-    
-    setStats({ total, released, damageReported, pendingSync });
-    setRecentInspections(combinedInspections.slice(0, 5));
+    const companies = new Set<string>();
+    combined.forEach(insp => {
+      const companyName = insp.checklistAnswers?.company_name as string;
+      if (companyName && companyName.trim() !== "") {
+        companies.add(companyName.trim());
+      }
+    });
+    setAvailableCompanies(Array.from(companies).sort());
     setLoading(false);
 
   }, [user, isOnline, toast]);
 
   useEffect(() => {
     if (user) {
-      fetchInspectionsAndStats();
+      fetchAllInspectionsData();
     } else {
-      setLoading(false); // Not logged in, no data to fetch
+      setLoading(false); 
     }
-  }, [user, fetchInspectionsAndStats]);
+  }, [user, fetchAllInspectionsData]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    let filtered = [...allInspections];
+
+    // Apply Date Filter
+    if (selectedDateFilter !== 'all') {
+      const now = new Date();
+      const todayStart = startOfDay(now);
+      
+      filtered = filtered.filter(insp => {
+        const inspDate = new Date(insp.timestamp);
+        if (selectedDateFilter === 'today') {
+          return isToday(inspDate);
+        }
+        if (selectedDateFilter === 'last7days') {
+          return isAfter(inspDate, subDays(todayStart, 7));
+        }
+        if (selectedDateFilter === 'last30days') {
+          return isAfter(inspDate, subDays(todayStart, 30));
+        }
+        return true;
+      });
+    }
+
+    // Apply Company Filter
+    if (selectedCompanyFilter !== 'all') {
+      filtered = filtered.filter(insp => {
+        const companyName = insp.checklistAnswers?.company_name as string;
+        return companyName === selectedCompanyFilter;
+      });
+    }
+    
+    setProcessedInspections(filtered);
+
+    // Calculate stats based on processed inspections
+    const total = filtered.length;
+    const released = filtered.filter(insp => insp.isReleased).length;
+    const damageReported = filtered.filter(insp => insp.damageSummary && insp.damageSummary.trim() !== "").length;
+    const pendingSync = filtered.filter(insp => (insp as LocalInspectionData).needsSync === 1).length; // This should consider allInspections for accuracy if filters mean to show only a subset. For simplicity, showing for current filtered set.
+    
+    setStats({ total, released, damageReported, pendingSync });
+    setRecentInspections(filtered.slice(0, 5));
+
+  }, [allInspections, selectedDateFilter, selectedCompanyFilter, loading]);
 
 
-  if (loading) {
+  if (loading && allInspections.length === 0) { // Show loader only on initial full load
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-10rem)]">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -117,7 +179,7 @@ export default function DashboardPage() {
     );
   }
   
-  if (!user) return null; // Should be handled by layout, but good for safety
+  if (!user) return null; 
 
   return (
     <div className="space-y-8">
@@ -135,17 +197,55 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
+      {/* Filters Section */}
+      <Card className="shadow-md">
+        <CardHeader>
+          <CardTitle className="text-xl flex items-center gap-2"><Filter className="h-5 w-5 text-primary"/> Filters</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="date-filter" className="text-sm font-medium">Date Range</Label>
+            <Select value={selectedDateFilter} onValueChange={setSelectedDateFilter}>
+              <SelectTrigger id="date-filter">
+                <SelectValue placeholder="Select date range" />
+              </SelectTrigger>
+              <SelectContent>
+                {dateFilterOptions.map(option => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="company-filter" className="text-sm font-medium">Company</Label>
+            <Select value={selectedCompanyFilter} onValueChange={setSelectedCompanyFilter} disabled={availableCompanies.length === 0 && selectedCompanyFilter === 'all'}>
+              <SelectTrigger id="company-filter">
+                <SelectValue placeholder="Select company" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Companies</SelectItem>
+                {availableCompanies.map(company => (
+                  <SelectItem key={company} value={company}>{company}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+             {availableCompanies.length === 0 && <p className="text-xs text-muted-foreground mt-1">No company data found in inspections.</p>}
+          </div>
+        </CardContent>
+      </Card>
+
+
       {/* Stats Section */}
       {stats && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card className="shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Inspections</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Inspections (Filtered)</CardTitle>
               <ListChecks className="h-5 w-5 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats.total}</div>
-              <p className="text-xs text-muted-foreground">All recorded inspections</p>
+              <p className="text-xs text-muted-foreground">Matching current filters</p>
             </CardContent>
           </Card>
           <Card className="shadow-md hover:shadow-lg transition-shadow">
@@ -155,7 +255,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats.released}</div>
-              <p className="text-xs text-muted-foreground">Marked as ready for dispatch</p>
+              <p className="text-xs text-muted-foreground">In filtered set</p>
             </CardContent>
           </Card>
           <Card className="shadow-md hover:shadow-lg transition-shadow">
@@ -165,16 +265,17 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats.damageReported}</div>
-              <p className="text-xs text-muted-foreground">Inspections with damage summaries</p>
+              <p className="text-xs text-muted-foreground">In filtered set</p>
             </CardContent>
           </Card>
           <Card className="shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Pending Sync</CardTitle>
+              <CardTitle className="text-sm font-medium">Pending Sync (Overall)</CardTitle>
               <CloudOff className="h-5 w-5 text-muted-foreground text-orange-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.pendingSync}</div>
+              {/* Pending Sync should ideally be from allInspections, not filtered, as it's a global status */}
+              <div className="text-2xl font-bold">{allInspections.filter(insp => (insp as LocalInspectionData).needsSync === 1).length}</div>
               <p className="text-xs text-muted-foreground">Inspections saved locally</p>
             </CardContent>
           </Card>
@@ -230,15 +331,21 @@ export default function DashboardPage() {
       {/* Recent Inspections Section */}
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="text-xl font-semibold text-primary">Recent Inspections</CardTitle>
-           <CardDescription>A quick look at the latest inspection activities.</CardDescription>
+          <CardTitle className="text-xl font-semibold text-primary">Recent Inspections (Filtered)</CardTitle>
+           <CardDescription>A quick look at the latest inspection activities matching filters.</CardDescription>
         </CardHeader>
         <CardContent>
-          {recentInspections.length > 0 ? (
+          {loading && processedInspections.length === 0 ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="h-6 w-6 animate-spin text-primary mr-2" />
+              <span>Loading or applying filters...</span>
+            </div>
+          ) : recentInspections.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead><Truck className="inline-block mr-1 h-4 w-4"/>Truck ID</TableHead>
+                  <TableHead><Building className="inline-block mr-1 h-4 w-4"/>Company</TableHead>
                   <TableHead><CalendarDays className="inline-block mr-1 h-4 w-4"/>Date</TableHead>
                   <TableHead><UserCircle className="inline-block mr-1 h-4 w-4"/>Inspector</TableHead>
                   <TableHead>Status</TableHead>
@@ -250,6 +357,7 @@ export default function DashboardPage() {
                   const needsSync = (inspection as LocalInspectionData).needsSync === 1;
                   const linkId = (inspection.id && !needsSync) ? inspection.id : (inspection as LocalInspectionData).localId;
                   const keyId = (inspection as LocalInspectionData).localId || inspection.id;
+                  const companyName = (inspection.checklistAnswers?.company_name as string) || 'N/A';
                   
                   let statusBadge = <Badge variant="default" className="bg-green-500 hover:bg-green-600">Clear</Badge>;
                   if (inspection.isReleased) {
@@ -263,6 +371,7 @@ export default function DashboardPage() {
                   return (
                     <TableRow key={keyId}>
                       <TableCell className="font-medium">{inspection.truckIdNo}</TableCell>
+                      <TableCell>{companyName}</TableCell>
                       <TableCell>{new Date(inspection.timestamp).toLocaleDateString()}</TableCell>
                       <TableCell>{inspection.inspectorName || (inspection as LocalInspectionData).inspectorId}</TableCell>
                       <TableCell>{statusBadge}</TableCell>
@@ -281,12 +390,13 @@ export default function DashboardPage() {
               </TableBody>
             </Table>
           ) : (
-            <p className="text-muted-foreground text-center py-4">No recent inspection activity to display.</p>
+            <p className="text-muted-foreground text-center py-4">No recent inspection activity matches the current filters.</p>
           )}
         </CardContent>
       </Card>
     </div>
   );
 }
+    
 
     
