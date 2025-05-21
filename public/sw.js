@@ -2,94 +2,98 @@
 const CACHE_NAME = 'iasl-ec-manager-cache-v1';
 const urlsToCache = [
   '/',
-  '/offline.html', // A fallback page for offline
-  // Add other important assets like CSS, JS bundles if not handled by Next.js PWA plugins
-  // For Next.js, asset paths can be dynamic, so this might need a more sophisticated setup
-  // or reliance on runtime caching for specific assets.
+  '/offline.html',
+  '/manifest.json',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
+  // Add other critical static assets: CSS, JS bundles, fonts if self-hosted
+  // Be cautious about adding too many files or files that change frequently with hashes
 ];
 
 self.addEventListener('install', (event) => {
-  console.log('[Service Worker] Install');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
-        console.log('[Service Worker] Caching app shell');
+        console.log('Opened cache');
+        // Add essential app shell files
         return cache.addAll(urlsToCache);
       })
-      .catch(error => {
-        console.error('[Service Worker] Failed to cache app shell:', error);
+      .catch(err => {
+        console.error('Failed to open cache or add urls during install:', err);
+      })
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  // Let the browser handle requests for scripts from extensions.
+  if (event.request.url.startsWith('chrome-extension://')) {
+    return;
+  }
+
+  event.respondWith(
+    caches.match(event.request)
+      .then((response) => {
+        // Cache hit - return response
+        if (response) {
+          return response;
+        }
+
+        // IMPORTANT: Clone the request. A request is a stream and
+        // can only be consumed once. Since we are consuming this
+        // once by cache and once by the browser for fetch, we need
+        // to clone the response.
+        const fetchRequest = event.request.clone();
+
+        return fetch(fetchRequest).then(
+          (response) => {
+            // Check if we received a valid response
+            // Also ensure we only cache responses from http/https protocols
+            if (!response || response.status !== 200 || response.type !== 'basic' || 
+                !event.request.url.startsWith('http')) {
+              return response;
+            }
+
+            // IMPORTANT: Clone the response. A response is a stream
+            // and because we want the browser to consume the response
+            // as well as the cache consuming the response, we need
+            // to clone it so we have two streams.
+            const responseToCache = response.clone();
+
+            caches.open(CACHE_NAME)
+              .then((cache) => {
+                cache.put(event.request, responseToCache);
+              })
+              .catch(err => {
+                console.error('SW: Failed to cache response for', event.request.url, err);
+              });
+
+            return response;
+          }
+        ).catch(() => {
+          // Network request failed, try to serve offline page for navigation requests
+          if (event.request.mode === 'navigate') {
+            return caches.match('/offline.html');
+          }
+          // For other types of requests (e.g., API calls, images),
+          // if they fail and are not in cache, let the browser handle the error.
+          // You might want to return a placeholder image or a specific error response here for certain asset types.
+        });
       })
   );
 });
 
 self.addEventListener('activate', (event) => {
-  console.log('[Service Worker] Activate');
+  const cacheWhitelist = [CACHE_NAME];
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('[Service Worker] Removing old cache', cacheName);
+          if (cacheWhitelist.indexOf(cacheName) === -1) {
+            console.log('SW: Deleting old cache', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
     })
   );
-  return self.clients.claim();
-});
-
-self.addEventListener('fetch', (event) => {
-  // console.log('[Service Worker] Fetching', event.request.url);
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      (async () => {
-        try {
-          const preloadResponse = await event.preloadResponse;
-          if (preloadResponse) {
-            return preloadResponse;
-          }
-          const networkResponse = await fetch(event.request);
-          return networkResponse;
-        } catch (error) {
-          console.log('[Service Worker] Fetch failed; returning offline page instead.', error);
-          const cache = await caches.open(CACHE_NAME);
-          // Ensure 'offline.html' exists and is cached.
-          // If not, provide a very basic fallback.
-          const cachedResponse = await cache.match('/offline.html');
-          if (cachedResponse) return cachedResponse;
-          
-          // Basic fallback if offline.html is not cached
-          return new Response("<h1>You are offline</h1><p>Please check your internet connection.</p>", {
-            headers: { 'Content-Type': 'text/html' }
-          });
-        }
-      })()
-    );
-  } else if (urlsToCache.includes(event.request.url) || event.request.destination === 'style' || event.request.destination === 'script') {
-    // Cache-First strategy for static assets
-     event.respondWith(
-        caches.match(event.request)
-            .then((response) => {
-                return response || fetch(event.request).then((fetchResponse) => {
-                    return caches.open(CACHE_NAME).then((cache) => {
-                        // Don't cache non-GET requests or opaque responses (e.g. from CDNs without CORS)
-                        if (event.request.method === 'GET' && fetchResponse.type === 'basic') {
-                           cache.put(event.request, fetchResponse.clone());
-                        }
-                        return fetchResponse;
-                    });
-                });
-            })
-    );
-  }
-  // For other requests (like API calls to Firebase), let them pass through.
-  // More sophisticated caching strategies for API data can be added here if needed.
-});
-
-// Optional: Listen for messages from the client (e.g., to skip waiting)
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
 });
