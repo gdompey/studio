@@ -9,13 +9,16 @@ import { Button } from '@/components/ui/button';
 import { Printer, AlertTriangle, Loader2 } from 'lucide-react';
 import { firestore } from '@/lib/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
+import { getInspectionByIdOffline, type LocalInspectionData } from '@/lib/indexedDB';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 
 export default function ReportPage() {
   const params = useParams();
-  const reportId = params.id as string;
+  const reportId = params.id as string; // This could be Firestore ID or localId
   const [reportData, setReportData] = useState<InspectionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isOnline = useOnlineStatus();
 
   useEffect(() => {
     if (reportId) {
@@ -23,16 +26,36 @@ export default function ReportPage() {
         setLoading(true);
         setError(null);
         try {
-          const reportDocRef = doc(firestore, 'inspections', reportId);
-          const docSnap = await getDoc(reportDocRef);
+          let data: InspectionData | LocalInspectionData | undefined | null = null;
+          
+          // Try fetching from Firestore if online or if ID doesn't look like a localId
+          if (isOnline && !reportId.startsWith('offline_')) {
+            const reportDocRef = doc(firestore, 'inspections', reportId);
+            const docSnap = await getDoc(reportDocRef);
+            if (docSnap.exists()) {
+              data = { id: docSnap.id, ...docSnap.data(), timestamp: docSnap.data().timestamp.toDate ? docSnap.data().timestamp.toDate().toISOString() : docSnap.data().timestamp } as InspectionData;
+            }
+          }
+          
+          // If not found online (or offline, or ID is local) try IndexedDB
+          if (!data) {
+            const localData = await getInspectionByIdOffline(reportId);
+            if (localData) {
+               data = {
+                ...localData,
+                id: localData.id || localData.localId, // Prioritize Firestore ID if synced
+                photos: localData.photos.map(p => ({ name: p.name, url: p.dataUri || p.url || '' })),
+              };
+            }
+          }
 
-          if (docSnap.exists()) {
-            setReportData({ id: docSnap.id, ...docSnap.data() } as InspectionData);
+          if (data) {
+            setReportData(data as InspectionData);
           } else {
             setError(`Report with ID ${reportId} not found.`);
           }
         } catch (e) {
-          setError("Failed to load report data from Firebase.");
+          setError("Failed to load report data.");
           console.error(e);
         } finally {
           setLoading(false);
@@ -40,7 +63,7 @@ export default function ReportPage() {
       };
       fetchReport();
     }
-  }, [reportId]);
+  }, [reportId, isOnline]);
 
   const handlePrint = () => {
     window.print();

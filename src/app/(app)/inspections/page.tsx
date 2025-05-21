@@ -4,7 +4,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { FileText, PlusCircle, Search, Truck, Loader2 } from 'lucide-react';
+import { FileText, PlusCircle, Search, Truck, Loader2, CloudOff } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -18,14 +18,19 @@ import { Badge } from '@/components/ui/badge';
 import type { InspectionData } from '@/types';
 import { useEffect, useState } from 'react';
 import { firestore } from '@/lib/firebase/config';
-import { collection, getDocs, query, orderBy, where, or } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, where, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { USER_ROLES } from '@/lib/constants';
-
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { getOfflineInspections, type LocalInspectionData } from '@/lib/indexedDB';
+import { useToast } from '@/hooks/use-toast';
 
 export default function InspectionsListPage() {
   const { user, role } = useAuth();
-  const [inspections, setInspections] = useState<InspectionData[]>([]);
+  const isOnline = useOnlineStatus();
+  const { toast } = useToast();
+
+  const [inspections, setInspections] = useState<InspectionData[]>([]); // Combined list
   const [filteredInspections, setFilteredInspections] = useState<InspectionData[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
@@ -34,33 +39,62 @@ export default function InspectionsListPage() {
     const fetchInspections = async () => {
       if (!user) return;
       setLoading(true);
-      try {
-        const inspectionsCollectionRef = collection(firestore, 'inspections');
-        let q;
-        if (role === USER_ROLES.ADMIN) {
-          q = query(inspectionsCollectionRef, orderBy('timestamp', 'desc'));
-        } else {
-          // Inspectors only see their own inspections
-          q = query(inspectionsCollectionRef, where('inspectorId', '==', user.id), orderBy('timestamp', 'desc'));
+      let fetchedOnlineInspections: InspectionData[] = [];
+      let fetchedOfflineInspections: InspectionData[] = [];
+
+      if (isOnline) {
+        try {
+          const inspectionsCollectionRef = collection(firestore, 'inspections');
+          let q;
+          if (role === USER_ROLES.ADMIN) {
+            q = query(inspectionsCollectionRef, orderBy('timestamp', 'desc'));
+          } else {
+            q = query(inspectionsCollectionRef, where('inspectorId', '==', user.id), orderBy('timestamp', 'desc'));
+          }
+          const querySnapshot = await getDocs(q);
+          fetchedOnlineInspections = querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...(doc.data() as Omit<InspectionData, 'id'>),
+            // Convert Firestore Timestamp to string if necessary, or ensure consistent type
+             timestamp: (doc.data().timestamp as any)?.toDate ? (doc.data().timestamp as any).toDate().toISOString() : doc.data().timestamp,
+          }));
+        } catch (error) {
+          console.error("Error fetching online inspections:", error);
+          toast({ variant: "destructive", title: "Network Error", description: "Could not fetch inspections from server." });
         }
-        
-        const querySnapshot = await getDocs(q);
-        const fetchedInspections: InspectionData[] = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...(doc.data() as Omit<InspectionData, 'id'>),
-        }));
-        setInspections(fetchedInspections);
-        setFilteredInspections(fetchedInspections);
-      } catch (error) {
-        console.error("Error fetching inspections:", error);
-        // Handle error (e.g., show toast)
-      } finally {
-        setLoading(false);
       }
+
+      try {
+        const offlineData: LocalInspectionData[] = await getOfflineInspections();
+        fetchedOfflineInspections = offlineData
+            .filter(item => role === USER_ROLES.ADMIN || item.inspectorId === user.id) // Filter by inspector for non-admins
+            .map(item => ({
+                ...item,
+                id: item.localId, // Use localId as the primary ID for offline items not yet synced
+                // Ensure photos are in the correct format for InspectionData
+                photos: item.photos.map(p => ({ name: p.name, url: p.dataUri || p.url || '' })), 
+            }));
+      } catch (error) {
+        console.error("Error fetching offline inspections:", error);
+        toast({ variant: "destructive", title: "Local Data Error", description: "Could not load local inspections." });
+      }
+      
+      // Merge and deduplicate, prioritizing online data if localId matches an online record's localId field
+      const combinedMap = new Map<string, InspectionData>();
+      fetchedOfflineInspections.forEach(item => combinedMap.set(item.localId || item.id, { ...item, needsSync: item.needsSync ?? true }));
+      fetchedOnlineInspections.forEach(item => combinedMap.set(item.localId || item.id, { ...item, needsSync: false })); // Online items don't need sync
+
+      const combinedInspections = Array.from(combinedMap.values()).sort((a, b) => 
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      
+      setInspections(combinedInspections);
+      setFilteredInspections(combinedInspections);
+      setLoading(false);
     };
 
     fetchInspections();
-  }, [user, role]);
+  }, [user, role, isOnline, toast]);
   
   useEffect(() => {
     if (!searchTerm) {
@@ -86,7 +120,7 @@ export default function InspectionsListPage() {
             Truck Inspections
           </h1>
           <p className="text-muted-foreground mt-1">
-            Browse, search, and manage all truck inspections.
+            Browse, search, and manage all truck inspections. {!isOnline && <span className="text-destructive font-semibold">(Offline Mode)</span>}
           </p>
         </div>
         { role === USER_ROLES.INSPECTOR && (
@@ -115,6 +149,7 @@ export default function InspectionsListPage() {
           {loading ? (
             <div className="flex justify-center items-center py-8">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="ml-2">Loading inspections...</p>
             </div>
           ) : filteredInspections.length > 0 ? (
             <Table>
@@ -124,31 +159,32 @@ export default function InspectionsListPage() {
                   <TableHead>Truck Reg No.</TableHead>
                   <TableHead>Inspector</TableHead>
                   <TableHead>Date</TableHead>
-                  <TableHead>Location (Lat, Lon)</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredInspections.map((inspection) => (
-                  <TableRow key={inspection.id}>
+                  <TableRow key={inspection.id || inspection.localId}>
                     <TableCell className="font-medium">{inspection.truckIdNo}</TableCell>
                     <TableCell>{inspection.truckRegNo}</TableCell>
                     <TableCell>{inspection.inspectorName || inspection.inspectorId}</TableCell>
                     <TableCell>{new Date(inspection.timestamp).toLocaleDateString()}</TableCell>
                     <TableCell>
-                      {inspection.latitude && inspection.longitude 
-                        ? `${inspection.latitude.toFixed(3)}, ${inspection.longitude.toFixed(3)}` 
-                        : 'N/A'}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={inspection.damageSummary ? "destructive" : "default"} className={inspection.damageSummary ? "" : "bg-green-500 hover:bg-green-600"}>
-                        {inspection.damageSummary ? "Damage Reported" : "No Major Damage"}
-                      </Badge>
+                      {inspection.needsSync ? (
+                        <Badge variant="outline" className="border-orange-500 text-orange-600">
+                          <CloudOff className="mr-1 h-3 w-3" /> Pending Sync
+                        </Badge>
+                      ) : inspection.damageSummary ? (
+                        <Badge variant="destructive">Damage Reported</Badge>
+                      ) : (
+                        <Badge variant="default" className="bg-green-500 hover:bg-green-600">No Major Damage</Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button asChild variant="outline" size="sm">
-                        <Link href={`/reports/${inspection.id}`}>View Report</Link>
+                        {/* Link to report using Firestore ID if synced, localId otherwise */}
+                        <Link href={`/reports/${inspection.id.startsWith('offline_') ? inspection.localId : inspection.id}`}>View Report</Link>
                       </Button>
                     </TableCell>
                   </TableRow>

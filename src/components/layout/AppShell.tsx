@@ -8,27 +8,40 @@ import { SidebarNav } from './SidebarNav';
 import { UserNav } from './UserNav';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger }  from '@/components/ui/sheet';
-import { Menu, Shield } from 'lucide-react';
+import { Menu, Shield, Wifi, WifiOff } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
 import { useAuth } from '@/hooks/useAuth';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus'; // Import the hook
+import { Badge } from '@/components/ui/badge'; // For the indicator
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const isMobile = useIsMobile();
+  const isOnline = useOnlineStatus(); // Use the hook
 
   if (loading) {
-    // You can return a full-page loader here if desired
     return <div className="flex h-screen items-center justify-center"><Shield className="h-16 w-16 animate-pulse text-primary" /></div>;
   }
 
   if (!user) {
-    // This should ideally be handled by middleware or page-level checks redirecting to /auth/signin
-    // For robustness, you might redirect here or show an access denied message.
-    // For now, returning null as redirects should handle this.
     return null; 
   }
   
+  const OnlineStatusIndicator = () => (
+    <Badge variant={isOnline ? "default" : "destructive"} className={`ml-auto mr-2 hidden md:flex items-center gap-1 ${isOnline ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'} text-white`}>
+      {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+      {isOnline ? "Online" : "Offline"}
+    </Badge>
+  );
+
+  const MobileOnlineStatusIndicator = () => (
+     <Badge variant={isOnline ? "default" : "destructive"} className={`mr-2 items-center gap-1 ${isOnline ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'} text-white px-2 py-1 text-xs`}>
+      {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+      <span className="sr-only">{isOnline ? "Online" : "Offline"}</span>
+    </Badge>
+  );
+
   const sidebarContent = (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-4 border-b border-sidebar-border">
@@ -68,7 +81,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Image src="https://picsum.photos/seed/appicon/40/40" alt="App Logo" width={28} height={28} className="rounded-md" data-ai-hint="shield gear"/>
                 <span className="font-semibold text-md text-primary">{APP_NAME}</span>
             </Link>
-            <UserNav />
+            <div className="flex items-center gap-2">
+              <MobileOnlineStatusIndicator />
+              <UserNav />
+            </div>
           </header>
           <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
         </>
@@ -80,7 +96,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </aside>
           <div className="flex flex-col flex-1 md:pl-64">
             <header className="sticky top-0 z-30 flex h-16 items-center justify-end gap-4 border-b bg-background px-4 md:px-8 shadow-sm">
-              {/* You can add breadcrumbs or other header content here */}
+              <OnlineStatusIndicator />
               <UserNav />
             </header>
             <main className="flex-1 p-4 sm:p-6 md:p-8">

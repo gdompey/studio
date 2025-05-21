@@ -5,11 +5,12 @@ import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/components/auth/AuthContext';
-// AuthChildrenWrapper is no longer needed here
+import Head from 'next/head'; // Import Head
 
 export const metadata: Metadata = {
   title: 'IASL EC Manager',
   description: 'Inspection and Electronic Checklist Manager',
+  manifest: '/manifest.json', // Added manifest link
 };
 
 export const viewport: Viewport = {
@@ -30,6 +31,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <Head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#0A214F" />
+        {/* Add other PWA related meta tags if needed */}
+      </Head>
       <body
         className={`${GeistSans.variable} ${GeistMono.variable} antialiased font-sans`}
         suppressHydrationWarning
@@ -38,6 +44,23 @@ export default function RootLayout({
           {children}
         </AuthProvider>
         <Toaster />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                  navigator.serviceWorker.register('/sw.js')
+                    .then((registration) => {
+                      console.log('Service Worker registered with scope:', registration.scope);
+                    })
+                    .catch((error) => {
+                      console.error('Service Worker registration failed:', error);
+                    });
+                });
+              }
+            `,
+          }}
+        />
       </body>
     </html>
   );

@@ -18,12 +18,14 @@ import { DamageReportSection } from './DamageReportSection';
 import { useAuth } from '@/hooks/useAuth';
 import type { ChecklistItem, InspectionData, InspectionPhoto as ClientInspectionPhoto } from '@/types';
 import { USER_ROLES } from '@/lib/constants';
-import { AlertCircle, CheckCircle, Loader2, FileOutput, ListChecks, Car, Truck, StickyNote, Fuel, UserCircle, Building, Users, Briefcase, Camera } from 'lucide-react';
+import { AlertCircle, CheckCircle, Loader2, FileOutput, ListChecks, Car, Truck, StickyNote, Fuel, UserCircle, Building, Users, Briefcase, Camera, Save } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { firestore, storage } from '@/lib/firebase/config';
-import { addDoc, collection } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL, uploadBytes } from 'firebase/storage';
+import { addDoc, collection, doc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { saveInspectionOffline, type LocalInspectionData } from '@/lib/indexedDB'; // Import LocalInspectionData type
 
 // Define a more comprehensive schema for the form
 const inspectionFormSchema = z.object({
@@ -75,7 +77,6 @@ interface InspectionFormProps {
   initialLocation?: { latitude: number; longitude: number } | null;
 }
 
-// Helper to convert data URI to Blob
 function dataURIToBlob(dataURI: string): Blob {
   const byteString = atob(dataURI.split(',')[1]);
   const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
@@ -93,6 +94,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const isOnline = useOnlineStatus();
   
   const [photoDataUrisForAI, setPhotoDataUrisForAI] = useState<string[]>(initialPhotos.filter(p=>p.dataUri).map(p => p.dataUri!));
   const [allClientPhotos, setAllClientPhotos] = useState<ClientInspectionPhoto[]>(initialPhotos);
@@ -109,7 +111,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
     },
   });
 
-  const { watch, control, setValue, register: formRegister } = form;
+  const { watch, control, setValue, register: formRegister, formState } = form;
   const watchedFields = watch();
 
   useEffect(() => {
@@ -126,88 +128,118 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
       return;
     }
 
-    try {
-      const inspectionsCollectionRef = collection(firestore, 'inspections');
-      // Add a placeholder document to get an ID for storage paths
-      const tempDocForId = await addDoc(inspectionsCollectionRef, { creating: true });
-      const inspectionId = tempDocForId.id;
+    const localId = `offline_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-      const uploadedPhotoMetadatas: Array<{ name: string; url: string }> = [];
-
-      for (const clientPhoto of allClientPhotos) {
-        if (clientPhoto.dataUri && !clientPhoto.url.startsWith('https://firebasestorage.googleapis.com')) {
-          // Only upload if dataUri exists and it's not already a Firebase Storage URL
-          const photoBlob = dataURIToBlob(clientPhoto.dataUri);
-          const photoName = clientPhoto.name || `photo_${Date.now()}`;
-          const photoRef = ref(storage, `inspections/${inspectionId}/${photoName}`);
-          
-          await uploadBytes(photoRef, photoBlob);
-          const downloadURL = await getDownloadURL(photoRef);
-          uploadedPhotoMetadatas.push({ name: photoName, url: downloadURL });
-        } else if (clientPhoto.url.startsWith('https://firebasestorage.googleapis.com')) {
-          // If it's already a Firebase URL (e.g. from initialPhotos if editing), keep it
-           uploadedPhotoMetadatas.push({ name: clientPhoto.name, url: clientPhoto.url });
-        }
-      }
-      
-      // Delete the temporary document used for ID generation
-      // await deleteDoc(tempDocForId); // No, we update it. Or rather, we should use setDoc with the ID.
-      // Let's use addDoc and then get the ID for storage paths, then prepare final data.
-      // For simplicity, it's easier to create a new doc with full data later.
-      // The above approach of tempDocForId is okay for getting an ID first.
-      // Or, let's generate ID client side for storage path predictability, then use setDoc.
-      // const inspectionId = Date.now().toString(); // Simpler ID for now
-
-      const inspectionDataToSave: Omit<InspectionData, 'id'> = { // Firestore will generate ID if we use addDoc
+    // Prepare data for both online and offline saving
+    const inspectionBaseData = {
+        localId, // Used as key in IndexedDB and can be stored in Firestore for reconciliation
         inspectorId: user.id,
         inspectorName: user.name || user.email || "Unknown Inspector",
         truckIdNo: data.truckIdNo.toUpperCase(),
         truckRegNo: data.truckRegNo.toUpperCase(),
         timestamp: new Date().toISOString(),
-        photos: uploadedPhotoMetadatas,
         notes: data.generalNotes,
         checklistAnswers: data.checklistAnswers,
         damageSummary: data.damageSummary,
         latitude: initialLocation?.latitude,
         longitude: initialLocation?.longitude,
-      };
-      
-      // Save the final inspection data
-      const docRef = await addDoc(collection(firestore, "inspections"), inspectionDataToSave);
+    };
 
+    if (isOnline) {
+      try {
+        const uploadedPhotoMetadatas: Array<{ name: string; url: string }> = [];
+        for (const clientPhoto of allClientPhotos) {
+          if (clientPhoto.dataUri && !clientPhoto.url.startsWith('https://firebasestorage.googleapis.com')) {
+            const photoBlob = dataURIToBlob(clientPhoto.dataUri);
+            const photoName = clientPhoto.name || `photo_${Date.now()}`;
+            // Use localId for path predictability before Firestore doc is created
+            const photoRef = ref(storage, `inspections/${localId}/${photoName}`);
+            await uploadBytes(photoRef, photoBlob);
+            const downloadURL = await getDownloadURL(photoRef);
+            uploadedPhotoMetadatas.push({ name: photoName, url: downloadURL });
+          } else if (clientPhoto.url.startsWith('https://firebasestorage.googleapis.com')) {
+             uploadedPhotoMetadatas.push({ name: clientPhoto.name, url: clientPhoto.url });
+          }
+        }
+        
+        const inspectionDataToSaveOnline: Omit<InspectionData, 'id'> = {
+          ...inspectionBaseData,
+          photos: uploadedPhotoMetadatas,
+        };
 
-      toast({
-        title: "Inspection Saved!",
-        description: `Inspection for Truck ID ${data.truckIdNo} has been successfully recorded in Firebase.`,
-        action: (
-          <Button variant="outline" size="sm" onClick={() => router.push(`/reports/${docRef.id}`)}>
-            View Report
-          </Button>
-        ),
-      });
-      
-      router.push(`/reports/${docRef.id}`);
+        const docRef = await addDoc(collection(firestore, "inspections"), inspectionDataToSaveOnline);
+        
+        toast({
+          title: "Inspection Saved Online!",
+          description: `Inspection for Truck ID ${data.truckIdNo} recorded in Firebase.`,
+          action: <Button variant="outline" size="sm" onClick={() => router.push(`/reports/${docRef.id}`)}>View Report</Button>,
+        });
+        router.push(`/reports/${docRef.id}`);
 
-    } catch (error) {
-      console.error("Error saving inspection:", error);
-      toast({
-        title: "Save Failed",
-        description: (error as Error).message || "Could not save inspection to Firebase.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
+      } catch (error) {
+        console.error("Error saving inspection online, attempting offline save:", error);
+        toast({
+          title: "Online Save Failed",
+          description: "Could not save to Firebase. Saving offline instead.",
+          variant: "destructive",
+        });
+        await saveToOfflineDB(data, localId);
+      }
+    } else {
+      // Offline saving
+      await saveToOfflineDB(data, localId);
     }
+    setIsLoading(false);
+  };
+
+  const saveToOfflineDB = async (data: InspectionFormValues, localIdToUse: string) => {
+     const inspectionDataToSaveOffline: LocalInspectionData = {
+        localId: localIdToUse,
+        inspectorId: user!.id, // user is checked before onSubmit
+        inspectorName: user!.name || user!.email || "Unknown Inspector",
+        truckIdNo: data.truckIdNo.toUpperCase(),
+        truckRegNo: data.truckRegNo.toUpperCase(),
+        timestamp: new Date().toISOString(),
+        // Store photos with dataUris for offline
+        photos: allClientPhotos.map(p => ({ name: p.name, url: p.url, dataUri: p.dataUri })),
+        notes: data.generalNotes,
+        checklistAnswers: data.checklistAnswers,
+        damageSummary: data.damageSummary,
+        latitude: initialLocation?.latitude,
+        longitude: initialLocation?.longitude,
+        needsSync: true,
+      };
+
+      try {
+        await saveInspectionOffline(inspectionDataToSaveOffline);
+        toast({
+          title: "Inspection Saved Offline",
+          description: `Truck ID ${data.truckIdNo} saved locally. Will sync when online.`,
+        });
+        router.push('/inspections'); // Navigate to list page, which should show offline items
+      } catch (offlineError) {
+        console.error("Error saving inspection offline:", offlineError);
+        toast({
+          title: "Offline Save Failed",
+          description: "Could not save inspection locally.",
+          variant: "destructive",
+        });
+      }
   };
   
   const handleFormPhotosUploaded = (newlyUploadedPhotos: { name: string; dataUri: string }[], formItemId?: string) => {
-    const clientPhotos: ClientInspectionPhoto[] = newlyUploadedPhotos.map(p => ({...p, url: '' })); // url is placeholder
+    const clientPhotos: ClientInspectionPhoto[] = newlyUploadedPhotos.map(p => ({...p, url: '' }));
 
     if (formItemId) {
-      setValue(`checklistAnswers.${formItemId}` as const, clientPhotos.map(p => p.dataUri)); 
+      // Store just dataUris or a reference in checklistAnswers if type is 'photo'
+      const currentChecklistPhotos = (form.getValues(`checklistAnswers.${formItemId}`) as string[] || []);
+      setValue(`checklistAnswers.${formItemId}` as const, [...currentChecklistPhotos, ...clientPhotos.map(p => p.dataUri!)]);
+      // Add to allClientPhotos for global tracking and AI
       setAllClientPhotos(prev => [...prev.filter(ex => !clientPhotos.some(np => np.dataUri === ex.dataUri)), ...clientPhotos]);
       setPhotoDataUrisForAI(prev => [...new Set([...prev, ...clientPhotos.map(p => p.dataUri!)])]);
+
     } else { 
+      // General photos
       setAllClientPhotos(prev => [...prev.filter(ex => !clientPhotos.some(np => np.dataUri === ex.dataUri)), ...clientPhotos]);
       setPhotoDataUrisForAI(prev => [...new Set([...prev, ...clientPhotos.map(p => p.dataUri!)])]);
     }
@@ -313,7 +345,13 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
               />
             )}
             {item.type === 'photo' && (
-              <PhotoUpload onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos, item.id)} />
+              // This PhotoUpload is specific to a checklist item.
+              // It should update checklistAnswers[item.id] with photo data (e.g., dataUris or references)
+              // And also contribute to the global allClientPhotos for AI and main storage.
+              <PhotoUpload 
+                onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos, item.id)} 
+                maxFiles={2} // Example: limit photos per checklist item
+              />
             )}
           </div>
         </FormControl>
@@ -390,6 +428,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
                 </FormItem>
               )}
             />
+            {/* This PhotoUpload is for general photos, not tied to a checklist item. */}
             <PhotoUpload onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos)} maxFiles={10} />
           </CardContent>
         </Card>
@@ -411,25 +450,25 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
                 {isLoading ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
-                    <CheckCircle className="mr-2 h-4 w-4" />
+                    <Save className="mr-2 h-4 w-4" />
                 )}
-                Save Inspection
+                {isOnline ? 'Save Inspection' : 'Save Offline'}
             </Button>
         </div>
 
-        {Object.keys(form.formState.errors).length > 0 && (
+        {Object.keys(formState.errors).length > 0 && (
           <div className="mt-6 p-4 border border-destructive/50 bg-destructive/10 rounded-md text-destructive">
             <div className="flex items-center font-semibold mb-2">
               <AlertCircle className="h-5 w-5 mr-2" />
               Please correct the errors above.
             </div>
             <ul className="list-disc list-inside text-sm">
-              {Object.entries(form.formState.errors).map(([key, error]) => (
+              {Object.entries(formState.errors).map(([key, error]) => (
                  <li key={key}>
-                  {key === 'checklistAnswers' && error && typeof error === 'object'
+                  {key === 'checklistAnswers' && error && typeof error === 'object' && error.message === undefined // Check if it's nested checklist errors
                     ? Object.entries(error as Record<string, any>).map(([itemKey, itemError]) => (
                         itemError?.message ? `${itemKey.replace(/_/g, ' ')}: ${itemError.message}` : null
-                      )).filter(Boolean).join(', ')
+                      )).filter(Boolean).join('; ')
                     : String(error?.message || `Error in ${key}`)}
                 </li>
               ))}
