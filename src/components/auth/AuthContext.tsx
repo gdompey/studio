@@ -15,7 +15,7 @@ import { auth, firestore, storage } from '@/lib/firebase/config';
 import type { User, InspectionData as FirestoreInspectionData } from '@/types';
 import type { UserRole } from '@/lib/constants';
 import { USER_ROLES } from '@/lib/constants';
-import React, { createContext, useState, useEffect, ReactNode, useCallback, useMemo } from 'react';
+import React, { createContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { getInspectionsToSync, markInspectionSynced, deleteInspectionOffline, type LocalInspectionData, updateSyncedInspectionPhotos } from '@/lib/indexedDB';
@@ -32,7 +32,7 @@ interface AuthContextType {
   signIn: (method: 'email' | 'google', credentials?: { email?: string; password?: string }) => Promise<void>;
   signOut: () => Promise<void>;
   signUp?: (credentials: { email: string; password?: string; name?: string }) => Promise<void>;
-  triggerSync?: () => Promise<void>;
+  triggerSync?: (options?: { showNoItemsToSyncToast?: boolean }) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -57,6 +57,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
   const isOnline = useOnlineStatus();
   const { toast } = useToast();
+  const isSyncingRef = useRef(false); // To prevent concurrent syncs
 
   useEffect(() => {
     setHasMounted(true);
@@ -84,21 +85,44 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => unsubscribe();
   }, []);
 
-  const syncOfflineData = useCallback(async () => {
-    if (!isOnline || !user || isSyncing) return;
+  const syncOfflineData = useCallback(async (options?: { showNoItemsToSyncToast?: boolean }) => {
+    if (isSyncingRef.current) {
+      console.log("Sync: Already in progress.");
+      if (options?.showNoItemsToSyncToast) {
+        toast({ title: "Sync Info", description: "Sync process is already running." });
+      }
+      return;
+    }
 
+    if (!isOnline || !user) {
+      if (options?.showNoItemsToSyncToast && !isOnline) {
+        toast({ title: "Sync Info", description: "Cannot sync while offline.", variant: "destructive" });
+      }
+      if (options?.showNoItemsToSyncToast && !user) {
+        toast({ title: "Sync Info", description: "User not logged in. Cannot sync.", variant: "destructive" });
+      }
+      return;
+    }
+
+    isSyncingRef.current = true;
     setIsSyncing(true);
+
+    const showNoItemsToast = options?.showNoItemsToSyncToast ?? false;
+
     toast({ title: "Sync Started", description: "Attempting to sync offline inspections." });
     console.log("Sync: Process started.");
 
     try {
       const inspectionsToSync = await getInspectionsToSync();
       console.log(`Sync: Found ${inspectionsToSync.length} inspections to sync.`);
+
       if (inspectionsToSync.length === 0) {
-        toast({ title: "Sync Complete", description: "No new inspections to sync." });
-        setIsSyncing(false);
-        console.log("Sync: No inspections to sync. Process finished.");
-        return;
+        if (showNoItemsToast) {
+          toast({ title: "Sync Complete", description: "No new inspections to sync." });
+        }
+        console.log("Sync: No inspections to sync. Process finished (no items found).");
+        // Important: Return here to avoid the "Sync Finished: 0 of 0" toast.
+        return; 
       }
 
       let successCount = 0;
@@ -156,20 +180,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         description: `An unexpected error occurred during the sync process. Details: ${(error as Error).message}` 
       });
     } finally {
+      isSyncingRef.current = false;
       setIsSyncing(false);
     }
-  }, [isOnline, user, toast, isSyncing]);
+  }, [isOnline, user, toast]);
 
 
   useEffect(() => {
-    if (isOnline && user && !isSyncing) {
-      // Debounce or delay sync slightly to avoid rapid firing on multiple online events
+    if (isOnline && user && !isSyncingRef.current) {
       const timer = setTimeout(() => {
-         syncOfflineData();
-      }, 1000); // 1 second delay
+         // Automatic syncs should not show the "no items to sync" toast.
+         syncOfflineData({ showNoItemsToSyncToast: false });
+      }, 1000); 
       return () => clearTimeout(timer);
     }
-  }, [isOnline, user, syncOfflineData, isSyncing]); // Added isSyncing to dependency array
+  }, [isOnline, user, syncOfflineData]); 
 
 
   const signIn = useCallback(async (method: 'email' | 'google', credentials?: { email?: string; password?: string }) => {
@@ -226,7 +251,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     signIn,
     signOut,
     signUp,
-    triggerSync: syncOfflineData,
+    // Manual trigger defaults to showing the "no items" toast if applicable
+    triggerSync: (opts?: { showNoItemsToSyncToast?: boolean }) => syncOfflineData(opts ?? { showNoItemsToSyncToast: true }),
   }), [user, loading, hasMounted, isSyncing, signIn, signOut, signUp, syncOfflineData]);
 
   if (!hasMounted) {
@@ -239,4 +265,3 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     </AuthContext.Provider>
   );
 };
-
