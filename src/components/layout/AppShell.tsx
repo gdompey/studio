@@ -7,7 +7,7 @@ import Image from 'next/image';
 import { SidebarNav } from './SidebarNav';
 import { UserNav } from './UserNav';
 import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetTrigger }  from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTrigger, SheetTitle }  from '@/components/ui/sheet'; // Added SheetTitle
 import { Menu, Shield, Wifi, WifiOff } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
 import { useAuth } from '@/hooks/useAuth';
@@ -74,6 +74,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="flex flex-col p-0 w-[280px] bg-sidebar text-sidebar-foreground">
+                <SheetTitle className="sr-only">Main Navigation Menu</SheetTitle> 
                 {sidebarContent}
               </SheetContent>
             </Sheet>
