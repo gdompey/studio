@@ -8,12 +8,12 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Image 
-            src="https://picsum.photos/seed/logo/100/100" // Placeholder logo
+            src="/company-logo.png" 
             alt={`${APP_NAME} Logo`}
             width={80}
             height={80}
             className="mx-auto rounded-lg shadow-md mb-4"
-            data-ai-hint="modern tech logo"
+            data-ai-hint="company logo"
           />
           <h1 className="text-3xl font-bold text-primary">{APP_NAME}</h1>
         </div>

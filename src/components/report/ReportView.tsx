@@ -62,7 +62,7 @@ export function ReportView({ reportData }: ReportViewProps) {
     <Card className="max-w-4xl mx-auto p-4 sm:p-8 shadow-xl print:shadow-none print:border-none">
       <CardHeader className="text-center border-b pb-6 mb-6 print:border-b-2 print:border-gray-300">
         <Image 
-            src="https://picsum.photos/seed/reportlogo/100/100"
+            src="/company-logo.png"
             alt={`${APP_NAME} Logo`}
             width={60}
             height={60}

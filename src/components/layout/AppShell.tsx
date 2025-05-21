@@ -46,7 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-4 border-b border-sidebar-border">
         <Link href="/dashboard" className="flex items-center gap-2 text-sidebar-foreground hover:text-sidebar-primary-foreground">
-          <Image src="https://picsum.photos/seed/appicon/40/40" alt="App Logo" width={32} height={32} className="rounded-md" data-ai-hint="shield gear"/>
+          <Image src="/company-logo.png" alt="App Logo" width={32} height={32} className="rounded-md" data-ai-hint="company logo"/>
           <span className="font-semibold text-lg">{APP_NAME}</span>
         </Link>
       </div>
@@ -74,7 +74,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="flex flex-col p-0 w-[280px] bg-sidebar text-sidebar-foreground">
-                {/* Ensure SheetTitle is present for accessibility, its content can be visually hidden */}
                 <SheetTitle>
                   <span className="sr-only">Main Navigation Menu</span>
                 </SheetTitle>
@@ -82,7 +81,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </SheetContent>
             </Sheet>
              <Link href="/dashboard" className="flex items-center gap-2">
-                <Image src="https://picsum.photos/seed/appicon/40/40" alt="App Logo" width={28} height={28} className="rounded-md" data-ai-hint="shield gear"/>
+                <Image src="/company-logo.png" alt="App Logo" width={28} height={28} className="rounded-md" data-ai-hint="company logo"/>
                 <span className="font-semibold text-md text-primary">{APP_NAME}</span>
             </Link>
             <div className="flex items-center gap-2">
