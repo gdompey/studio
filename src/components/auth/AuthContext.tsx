@@ -89,61 +89,72 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     setIsSyncing(true);
     toast({ title: "Sync Started", description: "Attempting to sync offline inspections." });
+    console.log("Sync: Process started.");
 
     try {
       const inspectionsToSync = await getInspectionsToSync();
+      console.log(`Sync: Found ${inspectionsToSync.length} inspections to sync.`);
       if (inspectionsToSync.length === 0) {
-        toast({ title: "Sync Complete", description: "No inspections to sync." });
+        toast({ title: "Sync Complete", description: "No new inspections to sync." });
         setIsSyncing(false);
+        console.log("Sync: No inspections to sync. Process finished.");
         return;
       }
 
       let successCount = 0;
       for (const localInspection of inspectionsToSync) {
         try {
+          console.log(`Sync: Processing inspection ${localInspection.localId}`);
           const uploadedPhotoMetadatas: Array<{ name: string; url: string }> = [];
           for (const clientPhoto of localInspection.photos) {
-            if (clientPhoto.dataUri) { // Only upload if dataUri exists
+            if (clientPhoto.dataUri) { 
               const photoBlob = dataURIToBlob(clientPhoto.dataUri);
               const photoName = clientPhoto.name || `photo_${Date.now()}`;
-              // Use localInspection.localId for storage path predictability
               const photoRef = ref(storage, `inspections/${localInspection.localId}/${photoName}`);
+              console.log(`Sync: Uploading photo ${photoName} for inspection ${localInspection.localId}`);
               await uploadBytes(photoRef, photoBlob);
               const downloadURL = await getDownloadURL(photoRef);
               uploadedPhotoMetadatas.push({ name: photoName, url: downloadURL });
-            } else if (clientPhoto.url) { // If it's an existing URL (less likely for needsSync=true items)
+              console.log(`Sync: Photo ${photoName} uploaded, URL: ${downloadURL}`);
+            } else if (clientPhoto.url) { 
               uploadedPhotoMetadatas.push({ name: clientPhoto.name, url: clientPhoto.url });
             }
           }
           
-          // Prepare data for Firestore, removing local-only fields
           const { needsSync, localId, ...inspectionDataCore } = localInspection;
           const firestoreData: Omit<FirestoreInspectionData, 'id'> = {
             ...inspectionDataCore,
-            localId: localInspection.localId, // Keep localId for reconciliation
-            photos: uploadedPhotoMetadatas, // Use newly uploaded photo URLs
-            timestamp: localInspection.timestamp || new Date().toISOString(), // Ensure timestamp
+            localId: localInspection.localId, 
+            photos: uploadedPhotoMetadatas, 
+            timestamp: localInspection.timestamp || new Date().toISOString(), 
           };
 
-          // If the local inspection already has a Firestore 'id', it means it was synced before
-          // but maybe photo uploads failed or something. In that case, update (setDoc with merge).
-          // For now, assume new items are added. A more robust sync would handle updates.
+          console.log(`Sync: Saving inspection ${localInspection.localId} to Firestore.`);
           const docRef = await addDoc(collection(firestore, "inspections"), firestoreData);
           await markInspectionSynced(localInspection.localId, docRef.id);
-          // Update local photos to remove dataUris and only keep URLs
           await updateSyncedInspectionPhotos(localInspection.localId, uploadedPhotoMetadatas);
 
           successCount++;
-          toast({ title: "Inspection Synced", description: `Truck ID ${localInspection.truckIdNo} synced.` });
+          toast({ title: "Inspection Synced", description: `Truck ID ${localInspection.truckIdNo} synced successfully.` });
+          console.log(`Sync: Inspection ${localInspection.localId} (Truck ID: ${localInspection.truckIdNo}) synced successfully with Firestore ID ${docRef.id}.`);
         } catch (itemError) {
-          console.error("Error syncing inspection:", localInspection.localId, itemError);
-          toast({ variant: "destructive", title: "Sync Error", description: `Failed to sync Truck ID ${localInspection.truckIdNo}.` });
+          console.error(`Sync: Error syncing inspection item ${localInspection.localId}:`, itemError);
+          toast({ 
+            variant: "destructive", 
+            title: "Sync Error for Item", 
+            description: `Failed to sync Truck ID ${localInspection.truckIdNo}. Error: ${(itemError as Error).message}` 
+          });
         }
       }
       toast({ title: "Sync Finished", description: `${successCount} of ${inspectionsToSync.length} inspections synced.` });
+      console.log(`Sync: Process finished. ${successCount}/${inspectionsToSync.length} items synced.`);
     } catch (error) {
-      console.error("Error during sync process:", error);
-      toast({ variant: "destructive", title: "Sync Failed", description: "An error occurred during the sync process." });
+      console.error("Sync: General error during sync process:", error);
+      toast({ 
+        variant: "destructive", 
+        title: "Sync Failed", 
+        description: `An unexpected error occurred during the sync process. Details: ${(error as Error).message}` 
+      });
     } finally {
       setIsSyncing(false);
     }
@@ -152,9 +163,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     if (isOnline && user && !isSyncing) {
-      syncOfflineData();
+      // Debounce or delay sync slightly to avoid rapid firing on multiple online events
+      const timer = setTimeout(() => {
+         syncOfflineData();
+      }, 1000); // 1 second delay
+      return () => clearTimeout(timer);
     }
-  }, [isOnline, user, syncOfflineData, isSyncing]);
+  }, [isOnline, user, syncOfflineData, isSyncing]); // Added isSyncing to dependency array
 
 
   const signIn = useCallback(async (method: 'email' | 'google', credentials?: { email?: string; password?: string }) => {
@@ -224,3 +239,4 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     </AuthContext.Provider>
   );
 };
+
