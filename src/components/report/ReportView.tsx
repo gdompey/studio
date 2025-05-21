@@ -1,16 +1,17 @@
+
 // src/components/report/ReportView.tsx
 "use client";
 
-import type { InspectionData, InspectionPhoto as ClientInspectionPhoto } from '@/types'; // ClientInspectionPhoto may include dataUri
+import type { InspectionData, InspectionPhoto as ClientInspectionPhoto } from '@/types'; 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import Image from 'next/image';
-import { User, CalendarDays, Truck, FileText, ShieldCheck, Camera, StickyNote, Wand2, MapPin } from 'lucide-react';
+import { User, CalendarDays, Truck, FileText, ShieldCheck, Camera, StickyNote, Wand2, MapPin, CheckSquare, Square } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
 
 interface ReportViewProps {
-  reportData: InspectionData; // This is Firestore data, photos are {name, url}
+  reportData: InspectionData; 
 }
 
 export function ReportView({ reportData }: ReportViewProps) {
@@ -21,12 +22,16 @@ export function ReportView({ reportData }: ReportViewProps) {
     truckIdNo,
     truckRegNo,
     timestamp,
-    photos, // This is Array<{ name: string; url: string; }>
+    photos, 
     notes,
     checklistAnswers,
     damageSummary,
     latitude,
     longitude,
+    isReleased,
+    releasedAt,
+    releasedByUserId,
+    releasedByUserName,
   } = reportData;
 
   const Section: React.FC<{ title: string; icon: React.ElementType; children: React.ReactNode }> = ({ title, icon: Icon, children }) => (
@@ -48,13 +53,9 @@ export function ReportView({ reportData }: ReportViewProps) {
     </div>
   );
 
-  // Prepare photos for display. ReportView receives Firestore data.
-  // ClientInspectionPhoto type is used here for compatibility if we were to also handle dataUris,
-  // but for Firebase stored data, we only have 'url'.
   const displayPhotos: ClientInspectionPhoto[] = photos.map(p => ({
     name: p.name,
-    url: p.url, // This is the Firebase Storage URL
-    // dataUri is not available from Firestore, Image component will use `url`
+    url: p.url, 
   }));
 
   return (
@@ -108,7 +109,6 @@ export function ReportView({ reportData }: ReportViewProps) {
                     {value ? 'Yes' : 'No'}
                   </Badge>
                 ) : Array.isArray(value) && value.every(item => typeof item === 'string' && item.startsWith('data:image')) ? (
-                  // This case handles checklist items that might store data URIs (e.g., specific damage photos from checklist)
                   <span>{value.length} photo(s) uploaded for this item</span>
                 ) : Array.isArray(value) && value.every(item => typeof item === 'string') ? (
                      <span>{value.join(', ') || 'N/A'}</span>
@@ -134,13 +134,28 @@ export function ReportView({ reportData }: ReportViewProps) {
           </Section>
         )}
 
+        {isReleased !== undefined && (
+          <Section title="Vehicle Release Status" icon={isReleased ? CheckSquare : Square}>
+            <DataItem label="Status" value={isReleased ? "Released" : "Not Released"} />
+            {isReleased && releasedAt && (
+              <DataItem label="Released Date" value={new Date(releasedAt).toLocaleString()} />
+            )}
+            {isReleased && releasedByUserName && (
+              <DataItem label="Released By" value={releasedByUserName} />
+            )}
+             {isReleased && releasedByUserId && (
+              <DataItem label="Released By User ID" value={releasedByUserId} />
+            )}
+          </Section>
+        )}
+
         {displayPhotos && displayPhotos.length > 0 && (
           <Section title="Inspection Photos" icon={Camera}>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 print:grid-cols-2">
               {displayPhotos.map((photo, index) => (
                 <div key={index} className="border rounded-md overflow-hidden shadow-sm aspect-video print:aspect-auto print:h-40">
                   <Image
-                    src={photo.url} // Use the Firebase Storage URL directly
+                    src={photo.url} 
                     alt={photo.name || `Inspection Photo ${index + 1}`}
                     width={300}
                     height={200}

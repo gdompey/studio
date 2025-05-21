@@ -5,7 +5,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { FileText, PlusCircle, Search, Truck, Loader2, CloudOff, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FileText, PlusCircle, Search, Truck, Loader2, CloudOff, ChevronLeft, ChevronRight, CheckSquare, Square } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -17,16 +17,17 @@ import {
 } from "@/components/ui/table";
 import { Badge } from '@/components/ui/badge';
 import type { InspectionData } from '@/types';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { firestore } from '@/lib/firebase/config';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore'; // Removed 'where'
+import { collection, getDocs, query, orderBy, doc, updateDoc, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { USER_ROLES } from '@/lib/constants';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { getOfflineInspections, type LocalInspectionData } from '@/lib/indexedDB';
+import { getOfflineInspections, type LocalInspectionData, updateInspectionOffline as updateLocalInspDb } from '@/lib/indexedDB';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox'; // For release toggle
 
 export default function InspectionsListPage() {
   const { user, role } = useAuth();
@@ -37,78 +38,71 @@ export default function InspectionsListPage() {
   const [filteredInspections, setFilteredInspections] = useState<Array<InspectionData | LocalInspectionData>>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [updatingRelease, setUpdatingRelease] = useState<string | null>(null); // To show loader on checkbox
 
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
 
-  useEffect(() => {
-    const fetchInspections = async () => {
-      if (!user) return;
-      setLoading(true);
-      let fetchedOnlineInspections: InspectionData[] = [];
-      let fetchedOfflineInspections: LocalInspectionData[] = [];
+  const fetchInspections = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    let fetchedOnlineInspections: InspectionData[] = [];
+    let fetchedOfflineInspections: LocalInspectionData[] = [];
 
-      if (isOnline) {
-        try {
-          const inspectionsCollectionRef = collection(firestore, 'inspections');
-          // Fetch all inspections, ordered by timestamp for all roles
-          const q = query(inspectionsCollectionRef, orderBy('timestamp', 'desc'));
-          
-          const querySnapshot = await getDocs(q);
-          fetchedOnlineInspections = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...(doc.data() as Omit<InspectionData, 'id'>),
-             timestamp: (doc.data().timestamp as any)?.toDate ? (doc.data().timestamp as any).toDate().toISOString() : doc.data().timestamp,
-          }));
-        } catch (error) {
-          console.error("Error fetching online inspections:", error);
-          toast({ variant: "destructive", title: "Network Error", description: "Could not fetch inspections from server." });
-        }
-      }
-
+    if (isOnline) {
       try {
-        const offlineData: LocalInspectionData[] = await getOfflineInspections();
-        // Show all offline inspections to all users
-        fetchedOfflineInspections = offlineData;
+        const inspectionsCollectionRef = collection(firestore, 'inspections');
+        const q = query(inspectionsCollectionRef, orderBy('timestamp', 'desc'));
+        
+        const querySnapshot = await getDocs(q);
+        fetchedOnlineInspections = querySnapshot.docs.map(doc => {
+          const data = doc.data() as Omit<InspectionData, 'id'>;
+          return {
+            id: doc.id,
+            ...data,
+            timestamp: (data.timestamp as any)?.toDate ? (data.timestamp as any).toDate().toISOString() : data.timestamp,
+            releasedAt: (data.releasedAt as any)?.toDate ? (data.releasedAt as any).toDate().toISOString() : data.releasedAt,
+          };
+        });
       } catch (error) {
-        console.error("Error fetching offline inspections:", error);
-        toast({ variant: "destructive", title: "Local Data Error", description: "Could not load local inspections." });
+        console.error("Error fetching online inspections:", error);
+        toast({ variant: "destructive", title: "Network Error", description: "Could not fetch inspections from server." });
       }
-      
-      const combinedMap = new Map<string, InspectionData | LocalInspectionData>();
-      
-      // Add offline items first. If an online item with the same localId comes later,
-      // the online version (from Firestore) will effectively update/replace it in the map
-      // if item.localId is used as a key for online items too.
-      fetchedOfflineInspections.forEach(item => {
-        combinedMap.set(item.localId, { ...item }); 
-      });
+    }
 
-      fetchedOnlineInspections.forEach(item => {
-        // Key by Firestore 'id' primarily. If it also has a 'localId' (meaning it was synced),
-        // it will overwrite the purely local version if one existed in the map under that localId.
-        // Or, if it's a new online-only item, it's added under its 'id'.
-        const keyForMap = item.localId || item.id; // Use localId if present (synced item), else Firestore id.
-                                                // This ensures that if an item was synced, its Firestore version
-                                                // updates its local-only placeholder in the map.
-        combinedMap.set(keyForMap, { ...item, needsSync: item.needsSync === true ? 1 : 0 });
-      });
+    try {
+      fetchedOfflineInspections = await getOfflineInspections();
+    } catch (error) {
+      console.error("Error fetching offline inspections:", error);
+      toast({ variant: "destructive", title: "Local Data Error", description: "Could not load local inspections." });
+    }
+    
+    const combinedMap = new Map<string, InspectionData | LocalInspectionData>();
+    
+    fetchedOfflineInspections.forEach(item => {
+      combinedMap.set(item.localId, { ...item }); 
+    });
 
-      const combinedInspections = Array.from(combinedMap.values()).sort((a, b) => 
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-      
-      setInspections(combinedInspections);
-      setFilteredInspections(combinedInspections);
-      setCurrentPage(1); // Reset to first page on new data fetch
-      setLoading(false);
-    };
+    fetchedOnlineInspections.forEach(item => {
+      const keyForMap = item.localId || item.id; 
+      combinedMap.set(keyForMap, { ...item, needsSync: item.needsSync === true ? 1 : 0 });
+    });
 
+    const combinedInspections = Array.from(combinedMap.values()).sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    
+    setInspections(combinedInspections);
+    setLoading(false);
+  }, [user, isOnline, toast]);
+
+
+  useEffect(() => {
     fetchInspections();
-  }, [user, role, isOnline, toast]);
+  }, [fetchInspections]);
   
   useEffect(() => {
-    setCurrentPage(1); // Reset to first page on search term change
+    setCurrentPage(1); 
     if (!searchTerm) {
       setFilteredInspections(inspections);
       return;
@@ -122,6 +116,66 @@ export default function InspectionsListPage() {
       )
     );
   }, [searchTerm, inspections]);
+
+  const handleSetReleaseStatus = async (inspection: InspectionData | LocalInspectionData, newReleasedState: boolean) => {
+    if (!user) {
+      toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
+      return;
+    }
+    const currentInspectionId = (inspection as LocalInspectionData).localId || inspection.id;
+    setUpdatingRelease(currentInspectionId);
+
+    const releaseData: Partial<InspectionData> = {
+      isReleased: newReleasedState,
+      releasedAt: newReleasedState ? new Date().toISOString() : null,
+      releasedByUserId: newReleasedState ? user.id : undefined, // Use undefined to remove field if supported, or null
+      releasedByUserName: newReleasedState ? (user.name || user.email) : undefined,
+    };
+    if (!newReleasedState) { // If un-releasing, explicitly set fields to null/undefined for Firestore
+        releaseData.releasedByUserId = null as any; // Firestore specific for field removal
+        releaseData.releasedByUserName = null as any;
+    }
+
+
+    let success = false;
+    // Try online update first if possible
+    if (isOnline && inspection.id) {
+      try {
+        const inspectionDocRef = doc(firestore, 'inspections', inspection.id);
+        await updateDoc(inspectionDocRef, {
+            ...releaseData,
+            releasedAt: newReleasedState ? Timestamp.fromDate(new Date()) : null,
+        });
+        toast({ title: "Success", description: `Vehicle release status updated for ${inspection.truckIdNo}.` });
+        // Update local IndexedDB copy to match, ensure needsSync is 0 for these fields
+        await updateLocalInspDb((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 0 });
+        success = true;
+      } catch (error) {
+        console.error("Error updating release status in Firestore:", error);
+        toast({ title: "Online Update Failed", description: "Saving release status locally.", variant: "destructive" });
+        // Fall through to offline update
+      }
+    }
+    
+    // Offline update or if online failed
+    if (!success) {
+      try {
+        await updateLocalInspDb((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 1 });
+        toast({ title: "Success", description: `Vehicle release status updated locally for ${inspection.truckIdNo}.` });
+        success = true;
+      } catch (error) {
+        console.error("Error updating release status in IndexedDB:", error);
+        toast({ title: "Local Update Failed", description: "Could not save release status.", variant: "destructive" });
+      }
+    }
+
+    if (success) {
+      // Refresh the list to show updated status
+      fetchInspections();
+    }
+    setUpdatingRelease(null);
+  };
+
 
   const totalPages = Math.ceil(filteredInspections.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -205,29 +259,21 @@ export default function InspectionsListPage() {
                   <TableHead>Truck Reg No.</TableHead>
                   <TableHead>Inspector</TableHead>
                   <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Status / Released</TableHead>
+                  <TableHead className="text-center">Released?</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {paginatedInspections.map((inspection) => {
-                  // Determine if the inspection needs sync.
-                  // LocalInspectionData stores needsSync as number (0 or 1).
-                  // InspectionData from Firestore might have it as boolean or undefined, or already converted to number by map.
                   const needsSync = ('needsSync' in inspection && typeof inspection.needsSync === 'number')
                     ? inspection.needsSync === 1
-                    : (inspection as InspectionData).needsSync === true; // Fallback for data not yet conforming
+                    : (inspection as InspectionData).needsSync === true; 
 
-                  // Determine the ID to use for the link.
-                  // Prefer Firestore ID (inspection.id) if available and the item is considered synced.
-                  // Otherwise, use localId (inspection.localId).
                   const isConsideredSynced = !!(inspection.id && !needsSync);
                   const linkId = isConsideredSynced ? inspection.id : (inspection as LocalInspectionData).localId;
-
-                  // For React key, a stable unique ID is needed.
-                  // inspection.localId is good if it exists (offline-first or synced from offline).
-                  // Otherwise, inspection.id (Firestore ID for online-only items).
                   const keyId = (inspection as LocalInspectionData).localId || inspection.id;
+                  const currentItemId = (inspection as LocalInspectionData).localId || inspection.id;
                   
                   return (
                   <TableRow key={keyId}>
@@ -236,7 +282,12 @@ export default function InspectionsListPage() {
                     <TableCell>{inspection.inspectorName || (inspection as LocalInspectionData).inspectorId}</TableCell>
                     <TableCell>{new Date(inspection.timestamp).toLocaleDateString()}</TableCell>
                     <TableCell>
-                      {needsSync ? (
+                      {inspection.isReleased ? (
+                        <Badge variant="default" className="bg-blue-500 hover:bg-blue-600">
+                          Released {inspection.releasedAt ? `on ${new Date(inspection.releasedAt).toLocaleDateString()}` : ''} 
+                          {inspection.releasedByUserName ? ` by ${inspection.releasedByUserName}` : ''}
+                        </Badge>
+                      ) : needsSync ? (
                         <Badge variant="outline" className="border-orange-500 text-orange-600">
                           <CloudOff className="mr-1 h-3 w-3" /> Pending Sync
                         </Badge>
@@ -246,12 +297,26 @@ export default function InspectionsListPage() {
                         <Badge variant="default" className="bg-green-500 hover:bg-green-600">No Major Damage</Badge>
                       )}
                     </TableCell>
+                    <TableCell className="text-center">
+                        {updatingRelease === currentItemId ? (
+                            <Loader2 className="h-5 w-5 animate-spin mx-auto text-primary" />
+                        ) : (
+                            <Checkbox
+                                id={`release-${keyId}`}
+                                checked={!!inspection.isReleased}
+                                onCheckedChange={(checked) => {
+                                    handleSetReleaseStatus(inspection, !!checked);
+                                }}
+                                aria-label={`Mark vehicle ${inspection.truckIdNo} as released`}
+                            />
+                        )}
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button asChild variant="outline" size="sm" disabled={!linkId}>
                         {linkId ? (
                           <Link href={`/reports/${linkId}`}>View Report</Link>
                         ) : (
-                          <span>No ID</span> // Should not happen if keyId logic is sound
+                          <span>No ID</span>
                         )}
                       </Button>
                     </TableCell>
@@ -295,4 +360,3 @@ export default function InspectionsListPage() {
     </div>
   );
 }
-

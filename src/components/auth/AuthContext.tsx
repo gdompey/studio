@@ -1,3 +1,4 @@
+
 // src/components/auth/AuthContext.tsx
 "use client";
 
@@ -12,14 +13,14 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { auth, firestore, storage } from '@/lib/firebase/config'; 
-import type { User, InspectionData as FirestoreInspectionData } from '@/types';
+import type { InspectionData as FirestoreInspectionData, User } from '@/types';
 import type { UserRole } from '@/lib/constants';
 import { USER_ROLES } from '@/lib/constants';
 import React, { createContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { getInspectionsToSync, markInspectionSynced, deleteInspectionOffline, type LocalInspectionData, updateSyncedInspectionPhotos } from '@/lib/indexedDB';
-import { addDoc, collection, doc, setDoc } from 'firebase/firestore';
+import { getInspectionsToSync, markInspectionSynced, type LocalInspectionData, updateSyncedInspectionPhotos } from '@/lib/indexedDB';
+import { addDoc, collection, doc, setDoc, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useToast } from '@/hooks/use-toast';
 
@@ -57,7 +58,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
   const isOnline = useOnlineStatus();
   const { toast } = useToast();
-  const isSyncingRef = useRef(false); // To prevent concurrent syncs
+  const isSyncingRef = useRef(false); 
 
   useEffect(() => {
     setHasMounted(true);
@@ -121,21 +122,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           toast({ title: "Sync Complete", description: "No new inspections to sync." });
         }
         console.log("Sync: No inspections to sync. Process finished (no items found).");
-        // Important: Return here to avoid the "Sync Finished: 0 of 0" toast.
         return; 
       }
 
       let successCount = 0;
       for (const localInspection of inspectionsToSync) {
         try {
-          console.log(`Sync: Processing inspection ${localInspection.localId}`);
+          console.log(`Sync: Processing inspection ${localInspection.localId}, Firestore ID: ${localInspection.id}`);
           const uploadedPhotoMetadatas: Array<{ name: string; url: string }> = [];
+          
           for (const clientPhoto of localInspection.photos) {
-            if (clientPhoto.dataUri) { 
+            if (clientPhoto.dataUri && !clientPhoto.url.startsWith('https://firebasestorage.googleapis.com')) { 
               const photoBlob = dataURIToBlob(clientPhoto.dataUri);
               const photoName = clientPhoto.name || `photo_${Date.now()}`;
-              const photoRef = ref(storage, `inspections/${localInspection.localId}/${photoName}`);
-              console.log(`Sync: Uploading photo ${photoName} for inspection ${localInspection.localId}`);
+              // Use localId or Firestore ID if available for path predictability
+              const storagePathId = localInspection.id || localInspection.localId;
+              const photoRef = ref(storage, `inspections/${storagePathId}/${photoName}`);
+              console.log(`Sync: Uploading photo ${photoName} for inspection ${storagePathId}`);
               await uploadBytes(photoRef, photoBlob);
               const downloadURL = await getDownloadURL(photoRef);
               uploadedPhotoMetadatas.push({ name: photoName, url: downloadURL });
@@ -145,28 +148,44 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
           }
           
-          const { needsSync, localId, ...inspectionDataCore } = localInspection;
-          const firestoreData: Omit<FirestoreInspectionData, 'id'> = {
+          const { needsSync, localId: currentLocalId, id: firestoreIdToUse, ...inspectionDataCore } = localInspection;
+          
+          const firestoreData: Omit<FirestoreInspectionData, 'id'> & { localId?: string } = {
             ...inspectionDataCore,
-            localId: localInspection.localId, 
-            photos: uploadedPhotoMetadatas, 
-            timestamp: localInspection.timestamp || new Date().toISOString(), 
+            localId: currentLocalId, // Always include localId for traceability
+            photos: uploadedPhotoMetadatas.length > 0 ? uploadedPhotoMetadatas : localInspection.photos.map(p => ({name: p.name, url:p.url})), // Use new uploads or existing if no new dataUris
+            timestamp: localInspection.timestamp ? Timestamp.fromDate(new Date(localInspection.timestamp)) as any : Timestamp.now() as any,
+            // Ensure new release fields are correctly formatted for Firestore
+            isReleased: localInspection.isReleased,
+            releasedAt: localInspection.releasedAt ? Timestamp.fromDate(new Date(localInspection.releasedAt)) as any : null,
+            releasedByUserId: localInspection.releasedByUserId,
+            releasedByUserName: localInspection.releasedByUserName,
           };
 
-          console.log(`Sync: Saving inspection ${localInspection.localId} to Firestore.`);
-          const docRef = await addDoc(collection(firestore, "inspections"), firestoreData);
-          await markInspectionSynced(localInspection.localId, docRef.id);
-          await updateSyncedInspectionPhotos(localInspection.localId, uploadedPhotoMetadatas);
+
+          if (firestoreIdToUse) { // This inspection was previously synced or has a Firestore ID
+            console.log(`Sync: Updating existing inspection ${firestoreIdToUse} (local: ${currentLocalId}) in Firestore.`);
+            const docRef = doc(firestore, "inspections", firestoreIdToUse);
+            await setDoc(docRef, firestoreData, { merge: true });
+            await markInspectionSynced(currentLocalId, firestoreIdToUse);
+          } else { // New inspection
+            console.log(`Sync: Saving new inspection ${currentLocalId} to Firestore.`);
+            const docRef = await addDoc(collection(firestore, "inspections"), firestoreData);
+            await markInspectionSynced(currentLocalId, docRef.id);
+          }
+          
+          // After successful Firestore operation, update local photos to use URLs and clear dataUris
+          await updateSyncedInspectionPhotos(currentLocalId, firestoreData.photos as Array<{name: string; url: string}>);
 
           successCount++;
           toast({ title: "Inspection Synced", description: `Truck ID ${localInspection.truckIdNo} synced successfully.` });
-          console.log(`Sync: Inspection ${localInspection.localId} (Truck ID: ${localInspection.truckIdNo}) synced successfully with Firestore ID ${docRef.id}.`);
+          console.log(`Sync: Inspection ${currentLocalId} (Truck ID: ${localInspection.truckIdNo}) synced/updated successfully.`);
         } catch (itemError) {
           console.error(`Sync: Error syncing inspection item ${localInspection.localId}:`, itemError);
           toast({ 
             variant: "destructive", 
             title: "Sync Error for Item", 
-            description: `Failed to sync Truck ID ${localInspection.truckIdNo}. Error: ${(itemError as Error).message}` 
+            description: `Failed to sync Truck ID ${localInspection.truckIdNo}. Details: ${(itemError as Error).message}` 
           });
         }
       }
@@ -177,7 +196,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       toast({ 
         variant: "destructive", 
         title: "Sync Failed", 
-        description: `An unexpected error occurred during the sync process. Details: ${(error as Error).message}` 
+        description: `An unexpected error occurred. Details: ${(error as Error).message}` 
       });
     } finally {
       isSyncingRef.current = false;
@@ -189,7 +208,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (isOnline && user && !isSyncingRef.current) {
       const timer = setTimeout(() => {
-         // Automatic syncs should not show the "no items to sync" toast.
          syncOfflineData({ showNoItemsToSyncToast: false });
       }, 1000); 
       return () => clearTimeout(timer);
@@ -251,7 +269,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     signIn,
     signOut,
     signUp,
-    // Manual trigger defaults to showing the "no items" toast if applicable
     triggerSync: (opts?: { showNoItemsToSyncToast?: boolean }) => syncOfflineData(opts ?? { showNoItemsToSyncToast: true }),
   }), [user, loading, hasMounted, isSyncing, signIn, signOut, signUp, syncOfflineData]);
 

@@ -1,3 +1,4 @@
+
 import type { UserRole } from '@/lib/constants';
 
 export interface User {
@@ -47,4 +48,10 @@ export interface InspectionData {
   latitude?: number;
   longitude?: number;
   needsSync?: boolean; // Should ideally not be in Firestore schema, but useful for merged view
+
+  // New fields for vehicle release
+  isReleased?: boolean;
+  releasedAt?: string | null; // ISO string or null
+  releasedByUserId?: string;
+  releasedByUserName?: string;
 }
