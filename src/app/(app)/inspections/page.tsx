@@ -23,11 +23,11 @@ import { collection, getDocs, query, orderBy, doc, updateDoc, Timestamp } from '
 import { useAuth } from '@/hooks/useAuth';
 import { USER_ROLES } from '@/lib/constants';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { getOfflineInspections, type LocalInspectionData, updateInspectionOffline as updateLocalInspDb } from '@/lib/indexedDB';
+import { getOfflineInspections, type LocalInspectionData, updateInspectionOffline } from '@/lib/indexedDB'; // Changed import
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox'; // For release toggle
+import { Checkbox } from '@/components/ui/checkbox';
 
 export default function InspectionsListPage() {
   const { user, role } = useAuth();
@@ -128,11 +128,11 @@ export default function InspectionsListPage() {
     const releaseData: Partial<InspectionData> = {
       isReleased: newReleasedState,
       releasedAt: newReleasedState ? new Date().toISOString() : null,
-      releasedByUserId: newReleasedState ? user.id : undefined, // Use undefined to remove field if supported, or null
+      releasedByUserId: newReleasedState ? user.id : undefined, 
       releasedByUserName: newReleasedState ? (user.name || user.email) : undefined,
     };
-    if (!newReleasedState) { // If un-releasing, explicitly set fields to null/undefined for Firestore
-        releaseData.releasedByUserId = null as any; // Firestore specific for field removal
+    if (!newReleasedState) { 
+        releaseData.releasedByUserId = null as any; 
         releaseData.releasedByUserName = null as any;
     }
 
@@ -148,7 +148,7 @@ export default function InspectionsListPage() {
         });
         toast({ title: "Success", description: `Vehicle release status updated for ${inspection.truckIdNo}.` });
         // Update local IndexedDB copy to match, ensure needsSync is 0 for these fields
-        await updateLocalInspDb((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 0 });
+        await updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 0 }); // Changed call
         success = true;
       } catch (error) {
         console.error("Error updating release status in Firestore:", error);
@@ -160,7 +160,7 @@ export default function InspectionsListPage() {
     // Offline update or if online failed
     if (!success) {
       try {
-        await updateLocalInspDb((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 1 });
+        await updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 1 }); // Changed call
         toast({ title: "Success", description: `Vehicle release status updated locally for ${inspection.truckIdNo}.` });
         success = true;
       } catch (error) {
