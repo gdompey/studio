@@ -1,10 +1,10 @@
 // src/lib/indexedDB.ts
-import type { DBSchema, IDBPDatabase, StoreNames } from 'idb';
+import type { DBSchema, IDBPDatabase } from 'idb';
 import { openDB } from 'idb';
 import type { InspectionData, InspectionPhoto } from '@/types';
 
 const DB_NAME = 'iasl-ec-manager-db';
-const DB_VERSION = 1; // If schema changes, version must be incremented. Let's keep it 1 for now as this is a data type change within the existing schema structure.
+const DB_VERSION = 2; // Incremented version
 const INSPECTIONS_STORE_NAME = 'inspections';
 
 // Define the local version of InspectionData for IndexedDB
@@ -20,7 +20,7 @@ interface IASLDB extends DBSchema {
   [INSPECTIONS_STORE_NAME]: {
     key: string; // localId
     value: LocalInspectionData;
-    indexes: { 'needsSync': number, 'timestamp': string }; // Changed boolean to number
+    indexes: { 'needsSync': number; 'timestamp': string }; // Ensure 'needsSync' is number here
   };
 }
 
@@ -31,13 +31,38 @@ const getDb = (): Promise<IDBPDatabase<IASLDB>> => {
     dbPromise = openDB<IASLDB>(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion, newVersion, transaction) {
         console.log(`Upgrading DB from version ${oldVersion} to ${newVersion}`);
-        if (!db.objectStoreNames.contains(INSPECTIONS_STORE_NAME)) {
-          const store = db.createObjectStore(INSPECTIONS_STORE_NAME, { keyPath: 'localId' });
-          store.createIndex('needsSync', 'needsSync'); // Index type matches the field type (number)
-          store.createIndex('timestamp', 'timestamp');
+        
+        // Handle initial creation or upgrade to version 2
+        if (oldVersion < 2) {
+          let store;
+          if (db.objectStoreNames.contains(INSPECTIONS_STORE_NAME)) {
+            store = transaction.objectStore(INSPECTIONS_STORE_NAME);
+            // If upgrading from a version where 'needsSync' might have been boolean,
+            // it's safest to delete and recreate the index.
+            if (store.indexNames.contains('needsSync')) {
+              // Potentially delete and recreate if type change is certain and problematic.
+              // For now, we ensure it's created if it doesn't exist or if recreating.
+              // If the index existed with a different type, `createIndex` might error
+              // or behave unexpectedly without explicit deletion.
+              // A simple approach if issues persist after version bump:
+              // store.deleteIndex('needsSync');
+              // store.createIndex('needsSync', 'needsSync');
+            }
+          } else {
+            store = db.createObjectStore(INSPECTIONS_STORE_NAME, { keyPath: 'localId' });
+          }
+
+          // Ensure 'needsSync' index is created (or re-created) to handle numbers
+          if (!store.indexNames.contains('needsSync')) {
+            store.createIndex('needsSync', 'needsSync');
+          }
+          // Ensure 'timestamp' index exists
+          if (!store.indexNames.contains('timestamp')) {
+            store.createIndex('timestamp', 'timestamp');
+          }
         }
-        // If DB_VERSION is incremented due to this change, you might need migration logic here if existing data used booleans.
-        // For now, assuming new setup or manual clearing if issues arise from type mismatch on existing data.
+        // Add further upgrade steps for future versions here:
+        // if (oldVersion < 3) { /* changes for version 3 */ }
       },
     });
   }
@@ -60,7 +85,9 @@ export async function saveInspectionOffline(inspectionData: Omit<LocalInspection
 
 export async function getOfflineInspections(): Promise<LocalInspectionData[]> {
   const db = await getDb();
-  return db.getAllFromIndex(INSPECTIONS_STORE_NAME, 'timestamp'); // Get all, sort by timestamp
+  // Sort by timestamp descending to show newest first
+  const allInspections = await db.getAllFromIndex(INSPECTIONS_STORE_NAME, 'timestamp');
+  return allInspections.reverse(); 
 }
 
 export async function getInspectionByIdOffline(localId: string): Promise<LocalInspectionData | undefined> {
@@ -88,7 +115,8 @@ export async function updateSyncedInspectionPhotos(localId: string, photosWithUr
     const db = await getDb();
     const inspection = await db.get(INSPECTIONS_STORE_NAME, localId);
     if (inspection) {
-        inspection.photos = photosWithUrls.map(p => ({...p, dataUri: undefined })); // Clear dataUri after upload
+        // Update photos to only contain Firebase URLs, remove dataUris to save space
+        inspection.photos = photosWithUrls.map(p => ({ name: p.name, url: p.url, dataUri: undefined }));
         await db.put(INSPECTIONS_STORE_NAME, inspection);
     }
 }
