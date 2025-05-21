@@ -7,27 +7,27 @@ import Image from 'next/image';
 import { SidebarNav } from './SidebarNav';
 import { UserNav } from './UserNav';
 import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetTrigger, SheetTitle }  from '@/components/ui/sheet'; // Added SheetTitle
+import { Sheet, SheetContent, SheetTrigger, SheetTitle }  from '@/components/ui/sheet';
 import { Menu, Shield, Wifi, WifiOff } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
 import { useAuth } from '@/hooks/useAuth';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useOnlineStatus } from '@/hooks/useOnlineStatus'; // Import the hook
-import { Badge } from '@/components/ui/badge'; // For the indicator
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { Badge } from '@/components/ui/badge';
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const isMobile = useIsMobile();
-  const isOnline = useOnlineStatus(); // Use the hook
+  const isOnline = useOnlineStatus();
 
   if (loading) {
     return <div className="flex h-screen items-center justify-center"><Shield className="h-16 w-16 animate-pulse text-primary" /></div>;
   }
 
   if (!user) {
-    return null; 
+    return null;
   }
-  
+
   const OnlineStatusIndicator = () => (
     <Badge variant={isOnline ? "default" : "destructive"} className={`ml-auto mr-2 hidden md:flex items-center gap-1 ${isOnline ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'} text-white`}>
       {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
@@ -74,7 +74,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="flex flex-col p-0 w-[280px] bg-sidebar text-sidebar-foreground">
-                <SheetTitle className="sr-only">Main Navigation Menu</SheetTitle> 
+                {/* Ensure SheetTitle is present for accessibility, its content can be visually hidden */}
+                <SheetTitle>
+                  <span className="sr-only">Main Navigation Menu</span>
+                </SheetTitle>
                 {sidebarContent}
               </SheetContent>
             </Sheet>
