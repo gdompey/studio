@@ -76,12 +76,22 @@ export default function InspectionsListPage() {
       }
       
       const combinedMap = new Map<string, InspectionData | LocalInspectionData>();
+      
+      // Add offline items first. If an online item with the same localId comes later,
+      // the online version (from Firestore) will effectively update/replace it in the map
+      // if item.localId is used as a key for online items too.
       fetchedOfflineInspections.forEach(item => {
         combinedMap.set(item.localId, { ...item }); 
       });
+
       fetchedOnlineInspections.forEach(item => {
-        const key = item.localId || item.id;
-        combinedMap.set(key, { ...item, needsSync: item.needsSync === true ? 1 : 0 });
+        // Key by Firestore 'id' primarily. If it also has a 'localId' (meaning it was synced),
+        // it will overwrite the purely local version if one existed in the map under that localId.
+        // Or, if it's a new online-only item, it's added under its 'id'.
+        const keyForMap = item.localId || item.id; // Use localId if present (synced item), else Firestore id.
+                                                // This ensures that if an item was synced, its Firestore version
+                                                // updates its local-only placeholder in the map.
+        combinedMap.set(keyForMap, { ...item, needsSync: item.needsSync === true ? 1 : 0 });
       });
 
       const combinedInspections = Array.from(combinedMap.values()).sort((a, b) => 
@@ -201,14 +211,29 @@ export default function InspectionsListPage() {
               </TableHeader>
               <TableBody>
                 {paginatedInspections.map((inspection) => {
-                  const needsSync = 'needsSync' in inspection ? inspection.needsSync === 1 : (inspection as InspectionData).needsSync === true;
-                  const displayId = 'localId' in inspection && inspection.localId ? inspection.localId : inspection.id;
+                  // Determine if the inspection needs sync.
+                  // LocalInspectionData stores needsSync as number (0 or 1).
+                  // InspectionData from Firestore might have it as boolean or undefined, or already converted to number by map.
+                  const needsSync = ('needsSync' in inspection && typeof inspection.needsSync === 'number')
+                    ? inspection.needsSync === 1
+                    : (inspection as InspectionData).needsSync === true; // Fallback for data not yet conforming
 
+                  // Determine the ID to use for the link.
+                  // Prefer Firestore ID (inspection.id) if available and the item is considered synced.
+                  // Otherwise, use localId (inspection.localId).
+                  const isConsideredSynced = !!(inspection.id && !needsSync);
+                  const linkId = isConsideredSynced ? inspection.id : (inspection as LocalInspectionData).localId;
+
+                  // For React key, a stable unique ID is needed.
+                  // inspection.localId is good if it exists (offline-first or synced from offline).
+                  // Otherwise, inspection.id (Firestore ID for online-only items).
+                  const keyId = (inspection as LocalInspectionData).localId || inspection.id;
+                  
                   return (
-                  <TableRow key={displayId}>
+                  <TableRow key={keyId}>
                     <TableCell className="font-medium">{inspection.truckIdNo}</TableCell>
                     <TableCell>{inspection.truckRegNo}</TableCell>
-                    <TableCell>{inspection.inspectorName || inspection.inspectorId}</TableCell>
+                    <TableCell>{inspection.inspectorName || (inspection as LocalInspectionData).inspectorId}</TableCell>
                     <TableCell>{new Date(inspection.timestamp).toLocaleDateString()}</TableCell>
                     <TableCell>
                       {needsSync ? (
@@ -222,8 +247,12 @@ export default function InspectionsListPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button asChild variant="outline" size="sm">
-                        <Link href={`/reports/${displayId}`}>View Report</Link>
+                      <Button asChild variant="outline" size="sm" disabled={!linkId}>
+                        {linkId ? (
+                          <Link href={`/reports/${linkId}`}>View Report</Link>
+                        ) : (
+                          <span>No ID</span> // Should not happen if keyId logic is sound
+                        )}
                       </Button>
                     </TableCell>
                   </TableRow>
