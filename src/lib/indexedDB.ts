@@ -5,7 +5,7 @@ import { openDB } from 'idb';
 import type { InspectionData, InspectionPhoto } from '@/types';
 
 const DB_NAME = 'iasl-ec-manager-db';
-const DB_VERSION = 2; // Version remains 2 as new fields are optional
+const DB_VERSION = 2; // Version remains 2
 const INSPECTIONS_STORE_NAME = 'inspections';
 
 // Define the local version of InspectionData for IndexedDB
@@ -15,7 +15,7 @@ export interface LocalInspectionData extends Omit<InspectionData, 'id' | 'photos
   photos: Array<InspectionPhoto>; // Will store dataUris for offline photos
   needsSync: number; // 0 for false, 1 for true
   timestamp: string; // Ensure timestamp is always string
-  workshopLocation?: string; // Added workshop location
+  workshopLocation?: string; 
 
   // New fields for vehicle release (match InspectionData)
   isReleased?: boolean;
@@ -35,6 +35,11 @@ interface IASLDB extends DBSchema {
 let dbPromise: Promise<IDBPDatabase<IASLDB>> | null = null;
 
 const getDb = (): Promise<IDBPDatabase<IASLDB>> => {
+  if (typeof window === 'undefined') {
+    // This code is running on the server, IndexedDB is not available.
+    // console.error("Attempted to access IndexedDB on the server."); // Optional: for server logs
+    return Promise.reject(new Error("IndexedDB is not available on the server."));
+  }
   if (!dbPromise) {
     dbPromise = openDB<IASLDB>(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion, newVersion, transaction) {
@@ -47,13 +52,25 @@ const getDb = (): Promise<IDBPDatabase<IASLDB>> => {
           store = transaction.objectStore(INSPECTIONS_STORE_NAME);
         }
 
-        if (!store.indexNames.contains('needsSync')) {
-          store.createIndex('needsSync', 'needsSync');
+        // Ensure indexes are correctly set up, especially if migrating
+        if (oldVersion < 2) { 
+            // If upgrading from a version where needsSync might have been different
+            // (e.g., stored booleans, or index was misconfigured)
+            // it's safer to delete and recreate the index.
+            if (store.indexNames.contains('needsSync')) {
+                store.deleteIndex('needsSync');
+            }
+            store.createIndex('needsSync', 'needsSync'); // Will store numbers
+        } else {
+            // For new creations or upgrades from v2+ where needsSync should already be correct
+            if (!store.indexNames.contains('needsSync')) {
+              store.createIndex('needsSync', 'needsSync');
+            }
         }
+        
         if (!store.indexNames.contains('timestamp')) {
           store.createIndex('timestamp', 'timestamp');
         }
-        // No need to explicitly add workshopLocation index unless querying by it
       },
     });
   }
@@ -84,8 +101,6 @@ export async function updateInspectionOffline(localId: string, updates: Partial<
     const updatedInspection: LocalInspectionData = {
       ...inspection,
       ...updates,
-      // Ensure needsSync is 1 if there are offline updates,
-      // unless explicitly set to 0 by a sync operation.
       needsSync: 'needsSync' in updates ? (updates.needsSync as number) : 1,
     };
     await store.put(updatedInspection);
@@ -98,6 +113,7 @@ export async function updateInspectionOffline(localId: string, updates: Partial<
 
 export async function getOfflineInspections(): Promise<LocalInspectionData[]> {
   const db = await getDb();
+  // Sort by timestamp descending to get latest first
   const allInspections = await db.getAllFromIndex(INSPECTIONS_STORE_NAME, 'timestamp');
   return allInspections.reverse(); 
 }
@@ -119,9 +135,6 @@ export async function markInspectionSynced(localId: string, firestoreId: string)
   if (inspection) {
     inspection.needsSync = 0; 
     inspection.id = firestoreId; 
-    // If photos were synced, their dataUris might have been cleared.
-    // This function focuses on marking sync status and assigning Firestore ID.
-    // Photo URL updates are handled by updateSyncedInspectionPhotos.
     await db.put(INSPECTIONS_STORE_NAME, inspection);
   }
 }
@@ -131,8 +144,6 @@ export async function updateSyncedInspectionPhotos(localId: string, photosWithUr
     const inspection = await db.get(INSPECTIONS_STORE_NAME, localId);
     if (inspection) {
         inspection.photos = photosWithUrls.map(p => ({ name: p.name, url: p.url, dataUri: undefined }));
-        // Note: if this update happens after markInspectionSynced, needsSync should remain 0.
-        // Consider if this should also take needsSync as a parameter or if it's part of the same sync transaction.
         await db.put(INSPECTIONS_STORE_NAME, inspection);
     }
 }
@@ -142,4 +153,3 @@ export async function deleteInspectionOffline(localId: string): Promise<void> {
   const db = await getDb();
   await db.delete(INSPECTIONS_STORE_NAME, localId);
 }
-
