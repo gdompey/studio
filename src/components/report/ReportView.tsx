@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import Image from 'next/image';
-import { User, CalendarDays, Truck, FileText, ShieldCheck, Camera, StickyNote, Wand2, MapPin, CheckSquare, Square } from 'lucide-react';
+import { User, CalendarDays, Truck, FileText, ShieldCheck, Camera, StickyNote, Wand2, MapPin, CheckSquare, Square, Home } from 'lucide-react'; // Added Home
 import { APP_NAME } from '@/lib/constants';
 
 interface ReportViewProps {
@@ -21,6 +21,7 @@ export function ReportView({ reportData }: ReportViewProps) {
     inspectorName,
     truckIdNo,
     truckRegNo,
+    workshopLocation, // Added workshopLocation
     timestamp,
     photos, 
     notes,
@@ -82,6 +83,7 @@ export function ReportView({ reportData }: ReportViewProps) {
         <Section title="Truck Details & Location" icon={Truck}>
           <DataItem label="Truck ID No." value={truckIdNo} />
           <DataItem label="Truck Reg No." value={truckRegNo} />
+          <DataItem label="Workshop Location" value={workshopLocation} />
           <DataItem label="Inspection Date" value={new Date(timestamp).toLocaleString()} />
           {latitude && longitude && (
             <DataItem label="GPS Location">
@@ -178,3 +180,4 @@ export function ReportView({ reportData }: ReportViewProps) {
     </Card>
   );
 }
+

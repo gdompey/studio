@@ -15,6 +15,7 @@ export interface LocalInspectionData extends Omit<InspectionData, 'id' | 'photos
   photos: Array<InspectionPhoto>; // Will store dataUris for offline photos
   needsSync: number; // 0 for false, 1 for true
   timestamp: string; // Ensure timestamp is always string
+  workshopLocation?: string; // Added workshop location
 
   // New fields for vehicle release (match InspectionData)
   isReleased?: boolean;
@@ -39,21 +40,20 @@ const getDb = (): Promise<IDBPDatabase<IASLDB>> => {
       upgrade(db, oldVersion, newVersion, transaction) {
         console.log(`Upgrading DB from version ${oldVersion} to ${newVersion}`);
         
-        if (oldVersion < 2) {
-          let store;
-          if (db.objectStoreNames.contains(INSPECTIONS_STORE_NAME)) {
-            store = transaction.objectStore(INSPECTIONS_STORE_NAME);
-          } else {
-            store = db.createObjectStore(INSPECTIONS_STORE_NAME, { keyPath: 'localId' });
-          }
-
-          if (!store.indexNames.contains('needsSync')) {
-            store.createIndex('needsSync', 'needsSync');
-          }
-          if (!store.indexNames.contains('timestamp')) {
-            store.createIndex('timestamp', 'timestamp');
-          }
+        let store;
+        if (!db.objectStoreNames.contains(INSPECTIONS_STORE_NAME)) {
+          store = db.createObjectStore(INSPECTIONS_STORE_NAME, { keyPath: 'localId' });
+        } else {
+          store = transaction.objectStore(INSPECTIONS_STORE_NAME);
         }
+
+        if (!store.indexNames.contains('needsSync')) {
+          store.createIndex('needsSync', 'needsSync');
+        }
+        if (!store.indexNames.contains('timestamp')) {
+          store.createIndex('timestamp', 'timestamp');
+        }
+        // No need to explicitly add workshopLocation index unless querying by it
       },
     });
   }
@@ -84,7 +84,9 @@ export async function updateInspectionOffline(localId: string, updates: Partial<
     const updatedInspection: LocalInspectionData = {
       ...inspection,
       ...updates,
-      needsSync: 1, // Always mark for sync when updated offline
+      // Ensure needsSync is 1 if there are offline updates,
+      // unless explicitly set to 0 by a sync operation.
+      needsSync: 'needsSync' in updates ? (updates.needsSync as number) : 1,
     };
     await store.put(updatedInspection);
     await transaction.done;
@@ -140,3 +142,4 @@ export async function deleteInspectionOffline(localId: string): Promise<void> {
   const db = await getDb();
   await db.delete(INSPECTIONS_STORE_NAME, localId);
 }
+

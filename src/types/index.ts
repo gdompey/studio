@@ -40,6 +40,7 @@ export interface InspectionData {
   inspectorName?: string;
   truckIdNo: string;
   truckRegNo: string;
+  workshopLocation?: string; // Added workshop location
   timestamp: string; // ISO string
   photos: Array<{ name: string; url: string; }>; // For Firestore, always store name and Firebase Storage URL
   notes?: string;
@@ -55,3 +56,4 @@ export interface InspectionData {
   releasedByUserId?: string;
   releasedByUserName?: string;
 }
+

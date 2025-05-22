@@ -1,3 +1,4 @@
+
 // src/components/inspection/InspectionForm.tsx
 "use client";
 
@@ -18,7 +19,7 @@ import { DamageReportSection } from './DamageReportSection';
 import { useAuth } from '@/hooks/useAuth';
 import type { ChecklistItem, InspectionData, InspectionPhoto as ClientInspectionPhoto } from '@/types';
 import { USER_ROLES } from '@/lib/constants';
-import { AlertCircle, CheckCircle, Loader2, FileOutput, ListChecks, Car, Truck, StickyNote, Fuel, UserCircle, Building, Users, Briefcase, Camera, Save } from 'lucide-react';
+import { AlertCircle, CheckCircle, Loader2, FileOutput, ListChecks, Car, Truck, StickyNote, Fuel, UserCircle, Building, Users, Briefcase, Camera, Save, Home } from 'lucide-react'; // Added Home icon for workshop
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { firestore, storage } from '@/lib/firebase/config';
@@ -31,12 +32,15 @@ import { saveInspectionOffline, type LocalInspectionData } from '@/lib/indexedDB
 const inspectionFormSchema = z.object({
   truckIdNo: z.string().min(1, "Truck ID No. is required"),
   truckRegNo: z.string().min(1, "Truck Reg No. is required"),
+  workshopLocation: z.string().min(1, "Workshop location is required"),
   generalNotes: z.string().optional(),
   checklistAnswers: z.record(z.any()).default({}),
   damageSummary: z.string().optional(),
 });
 
 type InspectionFormValues = z.infer<typeof inspectionFormSchema>;
+
+const workshopLocations = ["Itori", "Sagamu", "Calabar", "Opic", "Ojota", "ITB"];
 
 const exampleChecklistItems: ChecklistItem[] = [
   { id: 'vin_confirmation', label: 'Truck ID No. Match Vehicle?', type: 'radio', options: ['Yes', 'No'], required: true },
@@ -105,6 +109,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
     defaultValues: {
       truckIdNo: '',
       truckRegNo: '',
+      workshopLocation: '',
       generalNotes: '',
       checklistAnswers: {},
       damageSummary: '',
@@ -137,6 +142,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
         inspectorName: user.name || user.email || "Unknown Inspector",
         truckIdNo: data.truckIdNo.toUpperCase(),
         truckRegNo: data.truckRegNo.toUpperCase(),
+        workshopLocation: data.workshopLocation,
         timestamp: new Date().toISOString(),
         notes: data.generalNotes,
         checklistAnswers: data.checklistAnswers,
@@ -199,6 +205,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
         inspectorName: user!.name || user!.email || "Unknown Inspector",
         truckIdNo: data.truckIdNo.toUpperCase(),
         truckRegNo: data.truckRegNo.toUpperCase(),
+        workshopLocation: data.workshopLocation,
         timestamp: new Date().toISOString(),
         // Store photos with dataUris for offline
         photos: allClientPhotos.map(p => ({ name: p.name, url: p.url, dataUri: p.dataUri })),
@@ -207,7 +214,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
         damageSummary: data.damageSummary,
         latitude: initialLocation?.latitude,
         longitude: initialLocation?.longitude,
-        needsSync: true,
+        needsSync: 1,
       };
 
       try {
@@ -396,6 +403,30 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
                 </FormItem>
               )}
             />
+            <FormField
+              control={form.control}
+              name="workshopLocation"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="flex items-center gap-1"><Home className="h-4 w-4 text-muted-foreground"/>Workshop Location</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select workshop location" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {workshopLocations.map((location) => (
+                        <SelectItem key={location} value={location}>
+                          {location}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
           </CardContent>
         </Card>
 
@@ -479,3 +510,4 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
     </Form>
   );
 }
+

@@ -64,7 +64,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setHasMounted(true);
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUserType | null) => {
       if (firebaseUser) {
-        const isAdmin = firebaseUser.email?.includes('admin');
+        const isAdmin = firebaseUser.email?.includes('admin'); // Simplified role assignment
         const userRole = isAdmin ? USER_ROLES.ADMIN : USER_ROLES.INSPECTOR;
         
         const appUser: User = {
@@ -122,6 +122,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           toast({ title: "Sync Complete", description: "No new inspections to sync." });
         }
         console.log("Sync: No inspections to sync. Process finished (no items found).");
+        setIsSyncing(false); // Ensure isSyncing is reset
+        isSyncingRef.current = false;
         return; 
       }
 
@@ -132,7 +134,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const uploadedPhotoMetadatas: Array<{ name: string; url: string }> = [];
           
           for (const clientPhoto of localInspection.photos) {
-            if (clientPhoto.dataUri && !clientPhoto.url.startsWith('https://firebasestorage.googleapis.com')) { 
+            if (clientPhoto.dataUri && !clientPhoto.url?.startsWith('https://firebasestorage.googleapis.com')) { 
               const photoBlob = dataURIToBlob(clientPhoto.dataUri);
               const photoName = clientPhoto.name || `photo_${Date.now()}`;
               // Use localId or Firestore ID if available for path predictability
@@ -148,14 +150,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
           }
           
-          const { needsSync, localId: currentLocalId, id: firestoreIdToUse, ...inspectionDataCore } = localInspection;
+          // Exclude localId and needsSync from the core data being spread.
+          // id (Firestore ID) is handled separately.
+          const { localId: currentLocalId, id: firestoreIdToUse, needsSync, ...inspectionDataCore } = localInspection;
           
           const firestoreData: Omit<FirestoreInspectionData, 'id'> & { localId?: string } = {
-            ...inspectionDataCore,
+            ...inspectionDataCore, // This now correctly includes workshopLocation if present
             localId: currentLocalId, // Always include localId for traceability
-            photos: uploadedPhotoMetadatas.length > 0 ? uploadedPhotoMetadatas : localInspection.photos.map(p => ({name: p.name, url:p.url})), // Use new uploads or existing if no new dataUris
+            photos: uploadedPhotoMetadatas.length > 0 ? uploadedPhotoMetadatas : localInspection.photos.map(p => ({name: p.name, url:p.url || ''})),
             timestamp: localInspection.timestamp ? Timestamp.fromDate(new Date(localInspection.timestamp)) as any : Timestamp.now() as any,
-            // Ensure new release fields are correctly formatted for Firestore
             isReleased: localInspection.isReleased,
             releasedAt: localInspection.releasedAt ? Timestamp.fromDate(new Date(localInspection.releasedAt)) as any : null,
             releasedByUserId: localInspection.releasedByUserId,
@@ -202,7 +205,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       isSyncingRef.current = false;
       setIsSyncing(false);
     }
-  }, [isOnline, user, toast]);
+  }, [isOnline, user, toast, isSyncingRef]); // Removed isSyncing from deps
 
 
   useEffect(() => {
@@ -231,6 +234,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       console.error("Sign in failed", error);
       throw error;
+    } finally {
+      setLoading(false); // ensure loading is set to false in finally
     }
   }, [router]);
 
@@ -241,23 +246,43 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       router.push('/auth/signin');
     } catch (error) {
       console.error("Sign out failed", error);
+    } finally {
+      setLoading(false); // ensure loading is set to false
     }
   }, [router]);
 
   const signUp = useCallback(async (credentials: { email: string; password?: string; name?: string }) => {
     setLoading(true);
     if (!credentials.email || !credentials.password) {
+        setLoading(false);
         throw new Error("Email and password are required for sign up.");
     }
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, credentials.email, credentials.password);
       if (credentials.name && userCredential.user) {
         await updateProfile(userCredential.user, { displayName: credentials.name });
+        // Re-fetch user or update local user state if necessary to reflect displayName
+        const updatedFirebaseUser = auth.currentUser;
+         if (updatedFirebaseUser) {
+            const isAdmin = updatedFirebaseUser.email?.includes('admin');
+            const userRole = isAdmin ? USER_ROLES.ADMIN : USER_ROLES.INSPECTOR;
+            const appUser: User = {
+                id: updatedFirebaseUser.uid,
+                email: updatedFirebaseUser.email,
+                name: updatedFirebaseUser.displayName,
+                avatarUrl: updatedFirebaseUser.photoURL,
+                role: userRole,
+            };
+            setUser(appUser);
+            localStorage.setItem('iasl-user', JSON.stringify(appUser));
+        }
       }
       router.push('/dashboard');
     } catch (error) {
       console.error("Sign up failed", error);
       throw error;
+    } finally {
+        setLoading(false);
     }
   }, [router]);
 
@@ -282,3 +307,4 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     </AuthContext.Provider>
   );
 };
+
