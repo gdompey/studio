@@ -6,7 +6,7 @@ import { InspectionForm } from '@/components/inspection/InspectionForm';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, Camera, MapPin, AlertTriangle, CheckCircle, ArrowRight, Video, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { Loader2, Camera, MapPin, AlertTriangle, CheckCircle, ArrowRight, Video, Image as ImageIcon, Trash2, SwitchCamera } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import type { InspectionPhoto } from '@/types';
@@ -23,55 +23,86 @@ export default function NewInspectionPage() {
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState(false); // For photo capture process
+  const [currentFacingMode, setCurrentFacingMode] = useState<'environment' | 'user'>('environment');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { toast } = useToast();
 
-  // Request Camera Permission
+  // Effect for Camera Initialization and Permission
   useEffect(() => {
-    if (currentStep !== 'capture') return;
+    if (currentStep !== 'capture') {
+      // Ensure camera is stopped if we navigate away from capture step
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null;
+      }
+      return;
+    }
 
-    const getCameraPermission = async () => {
+    let activeStream: MediaStream | null = null;
+
+    const startSelectedCamera = async () => {
+      // Clean up previous stream if any
+      if (videoRef.current && videoRef.current.srcObject) {
+        const currentStream = videoRef.current.srcObject as MediaStream;
+        currentStream.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null; // Explicitly nullify before setting new stream
+      }
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        console.log(`Attempting to get camera with facingMode: ${currentFacingMode}`);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode } });
+        activeStream = stream;
         setHasCameraPermission(true);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
       } catch (error) {
-        console.error('Error accessing camera:', error);
-        // Fallback to any camera if environment facing fails
+        console.error(`Error accessing camera with ${currentFacingMode} facingMode:`, error);
+        const fallbackMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+        console.log(`Falling back to ${fallbackMode} camera.`);
         try {
-            console.log("Falling back to default camera");
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            setHasCameraPermission(true);
-            if (videoRef.current) {
-              videoRef.current.srcObject = stream;
-            }
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: fallbackMode } });
+          activeStream = stream;
+          // Update currentFacingMode state if fallback is successful and different
+          if (currentFacingMode !== fallbackMode) {
+              setCurrentFacingMode(fallbackMode); 
+          }
+          setHasCameraPermission(true);
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+          }
         } catch (fallbackError) {
-            console.error('Error accessing fallback camera:', fallbackError);
-            setHasCameraPermission(false);
-            toast({
-              variant: 'destructive',
-              title: 'Camera Access Denied',
-              description: 'Please enable camera permissions in your browser settings.',
-            });
+          console.error('Error accessing fallback camera:', fallbackError);
+          setHasCameraPermission(false);
+          activeStream = null; 
+          if (videoRef.current) videoRef.current.srcObject = null;
+          toast({
+            variant: 'destructive',
+            title: 'Camera Access Failed',
+            description: 'Could not access any camera. Please check permissions.',
+          });
         }
       }
     };
-    if (hasCameraPermission === null) {
-       getCameraPermission();
-    }
-    
-    // Cleanup stream on component unmount or step change
+
+    startSelectedCamera();
+
     return () => {
-        if (videoRef.current && videoRef.current.srcObject) {
-            const stream = videoRef.current.srcObject as MediaStream;
-            stream.getTracks().forEach(track => track.stop());
-        }
+      if (activeStream) {
+        activeStream.getTracks().forEach(track => track.stop());
+      }
+      // Defensive cleanup
+      if (videoRef.current && videoRef.current.srcObject) {
+          const stream = videoRef.current.srcObject as MediaStream;
+          stream.getTracks().forEach(track => track.stop());
+          videoRef.current.srcObject = null;
+      }
     };
-  }, [currentStep, toast, hasCameraPermission]);
+  }, [currentStep, currentFacingMode, toast]);
+
 
   // Request Location Permission & Get Location
   useEffect(() => {
@@ -160,6 +191,10 @@ export default function NewInspectionPage() {
     setCapturedPhotos(prevPhotos => prevPhotos.filter((_, i) => i !== index));
   };
 
+  const handleSwitchCamera = () => {
+    setCurrentFacingMode(prevMode => (prevMode === 'environment' ? 'user' : 'environment'));
+  };
+
   const proceedToDetails = () => {
     if (capturedPhotos.length === 0) {
       toast({ variant: 'destructive', title: 'No Photos', description: 'Please take at least one photo to proceed.' });
@@ -193,7 +228,7 @@ export default function NewInspectionPage() {
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Video className="h-6 w-6 text-primary" /> Live Camera Feed</CardTitle>
-            <CardDescription>Position the truck and take clear photos.</CardDescription>
+            <CardDescription>Position the truck and take clear photos. Current camera: {currentFacingMode}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="relative aspect-video bg-muted rounded-md overflow-hidden border">
@@ -213,10 +248,25 @@ export default function NewInspectionPage() {
               )}
             </div>
 
-            <Button onClick={handleTakePhoto} disabled={!hasCameraPermission || isCapturing || capturedPhotos.length >= 5} className="w-full sm:w-auto bg-accent hover:bg-accent/90">
-              {isCapturing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
-              Take Photo ({capturedPhotos.length}/5)
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button 
+                onClick={handleTakePhoto} 
+                disabled={hasCameraPermission !== true || isCapturing || capturedPhotos.length >= 5} 
+                className="flex-grow sm:flex-grow-0 bg-accent hover:bg-accent/90"
+              >
+                {isCapturing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
+                Take Photo ({capturedPhotos.length}/5)
+              </Button>
+              <Button 
+                onClick={handleSwitchCamera} 
+                disabled={hasCameraPermission !== true} 
+                variant="outline"
+                className="flex-grow sm:flex-grow-0"
+              >
+                <SwitchCamera className="mr-2 h-4 w-4" /> Switch Camera
+              </Button>
+            </div>
+
 
             {capturedPhotos.length > 0 && (
               <div>
@@ -268,7 +318,7 @@ export default function NewInspectionPage() {
 
             <Button 
                 onClick={proceedToDetails} 
-                disabled={capturedPhotos.length === 0 || !location || !hasCameraPermission || !hasLocationPermission}
+                disabled={capturedPhotos.length === 0 || !location || hasCameraPermission !== true || hasLocationPermission !== true}
                 className="w-full mt-6 bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               Proceed to Inspection Details <ArrowRight className="ml-2 h-4 w-4" />
