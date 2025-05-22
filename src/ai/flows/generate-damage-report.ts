@@ -36,11 +36,11 @@ const prompt = ai.definePrompt({
   output: {schema: GenerateDamageReportOutputSchema},
   prompt: `You are an expert damage assessor. Based on the following notes and images, create a summary of the damage to the vehicle.
 
-Notes: {{{notes}}}
-
 {{#each photoDataUris}}
 Photo {{@index}}: {{media url=this}}
-{{/each}}`,
+{{/each}}
+
+Notes: {{{notes}}}`,
 });
 
 const generateDamageReportFlow = ai.defineFlow(
