@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { 
-  FilePlus2, Eye, BarChart3, ListChecks, CheckCircle, AlertTriangle, CloudOff, Loader2, UserCircle, Truck, CalendarDays, Filter, Building
+  FilePlus2, Eye, BarChart3, ListChecks, CheckCircle, AlertTriangle, CloudOff, Loader2, UserCircle, Truck, CalendarDays, Filter, Building, Home as HomeIcon
 } from 'lucide-react';
 import { USER_ROLES } from '@/lib/constants';
 import type { InspectionData, LocalInspectionData } from '@/types';
@@ -50,7 +50,9 @@ export default function DashboardPage() {
   
   const [selectedDateFilter, setSelectedDateFilter] = useState<string>('all');
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState<string>('all');
+  const [selectedWorkshopLocationFilter, setSelectedWorkshopLocationFilter] = useState<string>('all');
   const [availableCompanies, setAvailableCompanies] = useState<string[]>([]);
+  const [availableWorkshopLocations, setAvailableWorkshopLocations] = useState<string[]>([]);
 
 
   const fetchAllInspectionsData = useCallback(async () => {
@@ -105,13 +107,19 @@ export default function DashboardPage() {
     setAllInspections(combined);
 
     const companies = new Set<string>();
+    const workshopLocationsSet = new Set<string>();
     combined.forEach(insp => {
       const companyName = insp.checklistAnswers?.company_name as string;
       if (companyName && companyName.trim() !== "") {
         companies.add(companyName.trim());
       }
+      const workshopLoc = insp.workshopLocation;
+      if (workshopLoc && workshopLoc.trim() !== "") {
+        workshopLocationsSet.add(workshopLoc.trim());
+      }
     });
     setAvailableCompanies(Array.from(companies).sort());
+    setAvailableWorkshopLocations(Array.from(workshopLocationsSet).sort());
     setLoading(false);
 
   }, [user, isOnline, toast]);
@@ -156,6 +164,11 @@ export default function DashboardPage() {
         return companyName === selectedCompanyFilter;
       });
     }
+
+    // Apply Workshop Location Filter
+    if (selectedWorkshopLocationFilter !== 'all') {
+      filtered = filtered.filter(insp => insp.workshopLocation === selectedWorkshopLocationFilter);
+    }
     
     setProcessedInspections(filtered);
 
@@ -163,12 +176,13 @@ export default function DashboardPage() {
     const total = filtered.length;
     const released = filtered.filter(insp => insp.isReleased).length;
     const damageReported = filtered.filter(insp => insp.damageSummary && insp.damageSummary.trim() !== "").length;
-    const pendingSync = filtered.filter(insp => (insp as LocalInspectionData).needsSync === 1).length; // This should consider allInspections for accuracy if filters mean to show only a subset. For simplicity, showing for current filtered set.
+    // Pending sync is global, not based on filtered set.
+    const pendingSync = allInspections.filter(insp => (insp as LocalInspectionData).needsSync === 1).length;
     
     setStats({ total, released, damageReported, pendingSync });
     setRecentInspections(filtered.slice(0, 5));
 
-  }, [allInspections, selectedDateFilter, selectedCompanyFilter, loading]);
+  }, [allInspections, selectedDateFilter, selectedCompanyFilter, selectedWorkshopLocationFilter, loading]);
 
 
   if (loading && allInspections.length === 0) { // Show loader only on initial full load
@@ -202,7 +216,7 @@ export default function DashboardPage() {
         <CardHeader>
           <CardTitle className="text-xl flex items-center gap-2"><Filter className="h-5 w-5 text-primary"/> Filters</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <Label htmlFor="date-filter" className="text-sm font-medium">Date Range</Label>
             <Select value={selectedDateFilter} onValueChange={setSelectedDateFilter}>
@@ -230,6 +244,21 @@ export default function DashboardPage() {
               </SelectContent>
             </Select>
              {availableCompanies.length === 0 && <p className="text-xs text-muted-foreground mt-1">No company data found in inspections.</p>}
+          </div>
+          <div>
+            <Label htmlFor="workshop-location-filter" className="text-sm font-medium">Workshop Location</Label>
+            <Select value={selectedWorkshopLocationFilter} onValueChange={setSelectedWorkshopLocationFilter} disabled={availableWorkshopLocations.length === 0 && selectedWorkshopLocationFilter === 'all'}>
+              <SelectTrigger id="workshop-location-filter">
+                <SelectValue placeholder="Select workshop" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Workshops</SelectItem>
+                {availableWorkshopLocations.map(location => (
+                  <SelectItem key={location} value={location}>{location}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {availableWorkshopLocations.length === 0 && <p className="text-xs text-muted-foreground mt-1">No workshop data found in inspections.</p>}
           </div>
         </CardContent>
       </Card>
@@ -274,8 +303,7 @@ export default function DashboardPage() {
               <CloudOff className="h-5 w-5 text-muted-foreground text-orange-500" />
             </CardHeader>
             <CardContent>
-              {/* Pending Sync should ideally be from allInspections, not filtered, as it's a global status */}
-              <div className="text-2xl font-bold">{allInspections.filter(insp => (insp as LocalInspectionData).needsSync === 1).length}</div>
+              <div className="text-2xl font-bold">{stats.pendingSync}</div>
               <p className="text-xs text-muted-foreground">Inspections saved locally</p>
             </CardContent>
           </Card>
@@ -346,6 +374,7 @@ export default function DashboardPage() {
                 <TableRow>
                   <TableHead><Truck className="inline-block mr-1 h-4 w-4"/>Truck ID</TableHead>
                   <TableHead><Building className="inline-block mr-1 h-4 w-4"/>Company</TableHead>
+                  <TableHead><HomeIcon className="inline-block mr-1 h-4 w-4"/>Workshop</TableHead>
                   <TableHead><CalendarDays className="inline-block mr-1 h-4 w-4"/>Date</TableHead>
                   <TableHead><UserCircle className="inline-block mr-1 h-4 w-4"/>Inspector</TableHead>
                   <TableHead>Status</TableHead>
@@ -358,6 +387,7 @@ export default function DashboardPage() {
                   const linkId = (inspection.id && !needsSync) ? inspection.id : (inspection as LocalInspectionData).localId;
                   const keyId = (inspection as LocalInspectionData).localId || inspection.id;
                   const companyName = (inspection.checklistAnswers?.company_name as string) || 'N/A';
+                  const workshopName = inspection.workshopLocation || 'N/A';
                   
                   let statusBadge = <Badge variant="default" className="bg-green-500 hover:bg-green-600">Clear</Badge>;
                   if (inspection.isReleased) {
@@ -372,6 +402,7 @@ export default function DashboardPage() {
                     <TableRow key={keyId}>
                       <TableCell className="font-medium">{inspection.truckIdNo}</TableCell>
                       <TableCell>{companyName}</TableCell>
+                      <TableCell>{workshopName}</TableCell>
                       <TableCell>{new Date(inspection.timestamp).toLocaleDateString()}</TableCell>
                       <TableCell>{inspection.inspectorName || (inspection as LocalInspectionData).inspectorId}</TableCell>
                       <TableCell>{statusBadge}</TableCell>
@@ -397,6 +428,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-    
-
-    

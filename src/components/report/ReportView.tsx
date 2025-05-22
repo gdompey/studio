@@ -21,7 +21,7 @@ export function ReportView({ reportData }: ReportViewProps) {
     inspectorName,
     truckIdNo,
     truckRegNo,
-    workshopLocation, // Added workshopLocation
+    workshopLocation, 
     timestamp,
     photos, 
     notes,
@@ -46,9 +46,12 @@ export function ReportView({ reportData }: ReportViewProps) {
     </div>
   );
 
-  const DataItem: React.FC<{ label: string; value?: string | number | null; children?: React.ReactNode }> = ({ label, value, children }) => (
+  const DataItem: React.FC<{ label: string; value?: string | number | null; children?: React.ReactNode; icon?: React.ElementType }> = ({ label, value, children, icon: Icon }) => (
     <div className="grid grid-cols-3 gap-2 items-start">
-      <p className="font-medium text-foreground/80 col-span-1">{label}:</p>
+      <p className="font-medium text-foreground/80 col-span-1 flex items-center">
+        {Icon && <Icon className="h-4 w-4 mr-2 text-muted-foreground" />}
+        {label}:
+      </p>
       {value !== undefined && <p className="text-foreground col-span-2">{value || 'N/A'}</p>}
       {children && <div className="col-span-2">{children}</div>}
     </div>
@@ -83,10 +86,10 @@ export function ReportView({ reportData }: ReportViewProps) {
         <Section title="Truck Details & Location" icon={Truck}>
           <DataItem label="Truck ID No." value={truckIdNo} />
           <DataItem label="Truck Reg No." value={truckRegNo} />
-          <DataItem label="Workshop Location" value={workshopLocation} />
-          <DataItem label="Inspection Date" value={new Date(timestamp).toLocaleString()} />
+          <DataItem label="Workshop" value={workshopLocation || 'N/A'} icon={Home} />
+          <DataItem label="Inspection Date" value={new Date(timestamp).toLocaleString()} icon={CalendarDays} />
           {latitude && longitude && (
-            <DataItem label="GPS Location">
+            <DataItem label="GPS Location" icon={MapPin}>
               <p className="text-foreground col-span-2">
                 Lat: {latitude.toFixed(6)}, Lon: {longitude.toFixed(6)}
                 <a 
@@ -180,4 +183,3 @@ export function ReportView({ reportData }: ReportViewProps) {
     </Card>
   );
 }
-
