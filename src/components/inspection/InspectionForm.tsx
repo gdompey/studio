@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { PhotoUpload } from './PhotoUpload';
-import { DamageReportSection } from './DamageReportSection';
+import { DamageReportSection } from './DamageReportSection'; // Assuming DamageReportSection will handle AI integration based on passed photos
 import { useAuth } from '@/hooks/useAuth';
 import type { ChecklistItem, InspectionData, InspectionPhoto as ClientInspectionPhoto } from '@/types';
 import { USER_ROLES } from '@/lib/constants';
@@ -47,7 +47,7 @@ const exampleChecklistItems: ChecklistItem[] = [
   { id: 'driver_name', label: 'Driver Name', type: 'text', required: true },
   { id: 'company_name', label: 'Company Name', type: 'text', required: false },
   { id: 'transporter_name', label: 'Transporter Name', type: 'text', required: false },
-  { id: 'business_unit', label: 'Business Unit', type: 'select', options: ['Logistics', 'Retail', 'Manufacturing', 'Other'], required: false },
+  { id: 'business_unit', label: 'Business Unit', type: 'select', options: ['AGRO','FMCG','M&C','O&G', 'PORT', 'OTHER'], required: false },
   { id: 'fuel_quantity', label: 'Fuel Quantity', type: 'select', options: ['Empty', 'Reserve', '1/4 Tank', '1/2 Tank', '3/4 Tank', 'Full Tank'], required: true },
   { id: 'accessories_present', label: 'Accessories Present (e.g., spare tire, jack, toolkit)', type: 'textarea', required: false },
   { id: 'exterior_damage_present', label: 'Exterior Damage Present?', type: 'radio', options: ['Yes', 'No'], required: true },
@@ -356,8 +356,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
               // It should update checklistAnswers[item.id] with photo data (e.g., dataUris or references)
               // And also contribute to the global allClientPhotos for AI and main storage.
               <PhotoUpload 
-                onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos, item.id)} 
-                maxFiles={2} // Example: limit photos per checklist item
+                onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos, item.id)} // Pass item.id to track which checklist item the photos belong to
               />
             )}
           </div>
@@ -443,9 +442,9 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="text-2xl font-semibold text-primary flex items-center gap-2"><Camera className="h-6 w-6" /> General Notes & Additional Photos</CardTitle>
-            <CardDescription>Add any overall notes and upload more general photos for the inspection (not tied to a specific damage). These will be used by the AI report. Initial photos are already included.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
+ <CardDescription>Add any overall notes and upload more general photos for the inspection (not tied to a specific damage). These will be used by the AI report.</CardDescription>
+ </CardHeader>
+ <CardContent className="space-y-6">
             <FormField
               control={form.control}
               name="generalNotes"
@@ -453,7 +452,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
                 <FormItem>
                   <FormLabel>General Inspection Notes</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="Enter any overall observations, specific damages, or comments..." {...field} rows={5} />
+ <Textarea placeholder="Allow capture of completed ECP form and upload other relevant photos" {...field} rows={5} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
