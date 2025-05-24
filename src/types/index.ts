@@ -2,11 +2,14 @@
 import type { UserRole } from '@/lib/constants';
 
 export interface User {
-  id: string;
+  id: string; // Corresponds to Firebase Auth UID
   email: string | null;
   name?: string | null;
   role: UserRole;
   avatarUrl?: string | null;
+  isDisabled?: boolean; // New field for enabling/disabling users
+  createdAt?: string; // ISO string, when the user profile was created in Firestore
+  lastLoginAt?: string; // ISO string, last login time
 }
 
 export interface ChecklistItemCondition {
@@ -40,7 +43,7 @@ export interface InspectionData {
   inspectorName?: string;
   truckIdNo: string;
   truckRegNo: string;
-  workshopLocation?: string; // Added workshop location
+  workshopLocation?: string;
   timestamp: string; // ISO string
   photos: Array<{ name: string; url: string; }>; // For Firestore, always store name and Firebase Storage URL
   notes?: string;

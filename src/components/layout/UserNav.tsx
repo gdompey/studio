@@ -1,3 +1,4 @@
+
 // src/components/layout/UserNav.tsx
 "use client";
 
@@ -13,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/useAuth";
-import { LogOut, User as UserIcon, Settings, ShieldCheck } from "lucide-react"; // ShieldCheck for Admin
+import { LogOut, User as UserIcon, Settings, ShieldCheck, UserCog } from "lucide-react";
 import Link from "next/link";
 import { USER_ROLES } from "@/lib/constants";
 
@@ -25,12 +26,12 @@ export function UserNav() {
   }
 
   const getInitials = (name?: string | null) => {
-    if (!name) return "U";
+    if (!name) return user?.email?.[0]?.toUpperCase() || "U";
     const names = name.split(' ');
     if (names.length > 1) {
-      return names[0][0] + names[names.length - 1][0];
+      return (names[0][0] + names[names.length - 1][0]).toUpperCase();
     }
-    return name.substring(0, 2);
+    return name.substring(0, 2).toUpperCase();
   };
 
   return (
@@ -38,8 +39,8 @@ export function UserNav() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-10 w-10 rounded-full">
           <Avatar className="h-10 w-10 border-2 border-primary">
-            <AvatarImage src={user.avatarUrl || `https://avatar.vercel.sh/${user.email}.png`} alt={user.name || user.email || "User"} />
-            <AvatarFallback className="bg-muted text-muted-foreground">{getInitials(user.name)}</AvatarFallback>
+            <AvatarImage src={user.avatarUrl || undefined} alt={user.name || user.email || "User"} />
+            <AvatarFallback className="bg-muted text-muted-foreground font-semibold">{getInitials(user.name)}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
@@ -50,14 +51,15 @@ export function UserNav() {
             <p className="text-xs leading-none text-muted-foreground">
               {user.email}
             </p>
+             {role && <p className="text-xs leading-none text-accent capitalize mt-1">{role}</p>}
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem asChild>
-            <Link href="/profile" className="cursor-pointer"> {/* Placeholder link */}
-              <UserIcon className="mr-2 h-4 w-4" />
-              <span>Profile</span>
+            <Link href="/profile" className="cursor-pointer"> 
+              <UserCog className="mr-2 h-4 w-4" />
+              <span>My Profile</span>
             </Link>
           </DropdownMenuItem>
           {role === USER_ROLES.ADMIN && (
@@ -68,12 +70,14 @@ export function UserNav() {
               </Link>
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem asChild>
-             <Link href="/settings" className="cursor-pointer"> {/* Placeholder link */}
+           {role === USER_ROLES.ADMIN && (
+            <DropdownMenuItem asChild>
+             <Link href="/admin/settings" className="cursor-pointer"> 
               <Settings className="mr-2 h-4 w-4" />
-              <span>Settings</span>
+              <span>App Settings</span>
             </Link>
           </DropdownMenuItem>
+           )}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={signOut} className="cursor-pointer text-destructive focus:text-destructive-foreground focus:bg-destructive">
