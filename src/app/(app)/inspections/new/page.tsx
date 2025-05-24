@@ -228,7 +228,7 @@ export default function NewInspectionPage() {
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Video className="h-6 w-6 text-primary" /> Live Camera Feed</CardTitle>
-            <CardDescription>Position the truck and take clear photos. Current camera: {currentFacingMode}</CardDescription>
+            <CardDescription>Please take a photo of the front view of the truck showing the registration number, other related area. Only save a clear photos. Current camera: {currentFacingMode}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="relative aspect-video bg-muted rounded-md overflow-hidden border">
