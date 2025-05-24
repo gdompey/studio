@@ -4,7 +4,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { USER_ROLES, SPECIAL_ADMIN_EMAIL } from '@/lib/constants'; // Import SPECIAL_ADMIN_EMAIL
+import { USER_ROLES, SPECIAL_ADMIN_EMAIL } from '@/lib/constants'; // Ensure SPECIAL_ADMIN_EMAIL is imported
 import type { User } from '@/types';
 import { firestore } from '@/lib/firebase/config';
 import { collection, getDocs, doc, updateDoc, Timestamp } from 'firebase/firestore';
