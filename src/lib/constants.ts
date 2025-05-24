@@ -1,3 +1,4 @@
+
 export const USER_ROLES = {
   ADMIN: 'admin',
   INSPECTOR: 'inspector',
@@ -6,3 +7,5 @@ export const USER_ROLES = {
 export type UserRole = typeof USER_ROLES[keyof typeof USER_ROLES];
 
 export const APP_NAME = "EC Manager";
+
+export const SPECIAL_ADMIN_EMAIL = "gdompey@iauto.services";

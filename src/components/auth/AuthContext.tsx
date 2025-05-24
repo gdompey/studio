@@ -16,7 +16,7 @@ import {
 import { auth, firestore, storage } from '@/lib/firebase/config'; 
 import type { InspectionData as FirestoreInspectionData, User } from '@/types';
 import type { UserRole } from '@/lib/constants';
-import { USER_ROLES, APP_NAME } from '@/lib/constants';
+import { USER_ROLES, APP_NAME, SPECIAL_ADMIN_EMAIL } from '@/lib/constants'; // Import SPECIAL_ADMIN_EMAIL
 import React, { createContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
@@ -51,8 +51,6 @@ function dataURIToBlob(dataURI: string): Blob {
   }
   return new Blob([ab], { type: mimeString });
 }
-
-const SPECIAL_ADMIN_EMAIL = "gdompey@iauto.services";
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -288,7 +286,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
 
   useEffect(() => {
-    if (isOnline && user && !isSyncingRef.current && !user.isDisabled) {
+    if (isOnline && user && !isSyncingRef.current && user.role && !user.isDisabled) { // Added check for user.role
       const timer = setTimeout(() => {
          syncOfflineData({ showNoItemsToSyncToast: false });
       }, 1000); 

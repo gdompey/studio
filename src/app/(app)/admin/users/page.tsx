@@ -4,7 +4,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { USER_ROLES } from '@/lib/constants';
+import { USER_ROLES, SPECIAL_ADMIN_EMAIL } from '@/lib/constants'; // Import SPECIAL_ADMIN_EMAIL
 import type { User } from '@/types';
 import { firestore } from '@/lib/firebase/config';
 import { collection, getDocs, doc, updateDoc, Timestamp } from 'firebase/firestore';
@@ -55,11 +55,11 @@ export default function ManageUsersPage() {
   }, [fetchUsers]);
 
   const handleToggleAdminRole = async (targetUser: User) => {
-    if (!currentUser || currentUser.id === targetUser.id && targetUser.email !== "gdompey@iauto.services") {
+    if (!currentUser || currentUser.id === targetUser.id && targetUser.email !== SPECIAL_ADMIN_EMAIL) {
       toast({ variant: "destructive", title: "Action Denied", description: "You cannot change your own role unless you are the super admin." });
       return;
     }
-     if (targetUser.email === "gdompey@iauto.services") {
+     if (targetUser.email === SPECIAL_ADMIN_EMAIL) {
       toast({ variant: "destructive", title: "Action Denied", description: "The role of the super admin cannot be changed." });
       return;
     }
@@ -84,7 +84,7 @@ export default function ManageUsersPage() {
       toast({ variant: "destructive", title: "Action Denied", description: "You cannot disable your own account." });
       return;
     }
-    if (targetUser.email === "gdompey@iauto.services") {
+    if (targetUser.email === SPECIAL_ADMIN_EMAIL) {
       toast({ variant: "destructive", title: "Action Denied", description: "The super admin account cannot be disabled." });
       return;
     }
