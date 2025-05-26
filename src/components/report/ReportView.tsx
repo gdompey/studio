@@ -166,6 +166,7 @@ export function ReportView({ reportData }: ReportViewProps) {
                     height={200}
                     className="w-full h-full object-cover"
                     data-ai-hint="damaged vehicle"
+                    unoptimized
                   />
                   <p className="text-xs text-center p-1 bg-muted text-muted-foreground print:hidden">{photo.name || `Photo ${index + 1}`}</p>
                 </div>
