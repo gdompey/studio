@@ -21,7 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { startOfDay, isToday, isAfter, subDays } from 'date-fns';
+import { startOfDay, isToday, isAfter, subDays, isYesterday } from 'date-fns'; // Added isYesterday
 
 interface DashboardStats {
   total: number;
@@ -33,6 +33,7 @@ interface DashboardStats {
 const dateFilterOptions = [
   { value: 'all', label: 'All Time' },
   { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' }, // Added Yesterday
   { value: 'last7days', label: 'Last 7 Days' },
   { value: 'last30days', label: 'Last 30 Days' },
 ];
@@ -92,7 +93,6 @@ export default function DashboardPage() {
     const combinedMap = new Map<string, InspectionData | LocalInspectionData>();
     
     fetchedOfflineInspections.forEach(item => {
-      // Ensure releasedAt is a string or null if it exists
       const normalizedItem = {
         ...item,
         releasedAt: typeof item.releasedAt === 'object' && item.releasedAt !== null ? (item.releasedAt as any).toDate().toISOString() : item.releasedAt,
@@ -151,6 +151,9 @@ export default function DashboardPage() {
         const inspDate = new Date(insp.timestamp);
         if (selectedDateFilter === 'today') {
           return isToday(inspDate);
+        }
+        if (selectedDateFilter === 'yesterday') { // Added yesterday logic
+          return isYesterday(inspDate);
         }
         if (selectedDateFilter === 'last7days') {
           return isAfter(inspDate, subDays(todayStart, 7));
@@ -433,3 +436,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
