@@ -160,7 +160,7 @@ export function ReportView({ reportData }: ReportViewProps) {
               {displayPhotos.map((photo, index) => (
                 <div key={index} className="border rounded-md overflow-hidden shadow-sm aspect-video print:aspect-auto print:h-40">
                   <Image
-                    src={encodeURIComponent(photo.url)} 
+                    src={photo.url} 
                     alt={photo.name || `Inspection Photo ${index + 1}`}
                     width={300}
                     height={200}
