@@ -33,7 +33,13 @@ export default function ReportPage() {
             const reportDocRef = doc(firestore, 'inspections', reportId);
             const docSnap = await getDoc(reportDocRef);
             if (docSnap.exists()) {
-              data = { id: docSnap.id, ...docSnap.data(), timestamp: docSnap.data().timestamp.toDate ? docSnap.data().timestamp.toDate().toISOString() : docSnap.data().timestamp } as InspectionData;
+              const firestoreData = docSnap.data();
+              data = { 
+                id: docSnap.id, 
+                ...firestoreData, 
+                timestamp: firestoreData.timestamp?.toDate ? firestoreData.timestamp.toDate().toISOString() : firestoreData.timestamp,
+                releasedAt: firestoreData.releasedAt?.toDate ? firestoreData.releasedAt.toDate().toISOString() : firestoreData.releasedAt,
+              } as InspectionData;
             }
           }
           
@@ -45,6 +51,7 @@ export default function ReportPage() {
                 ...localData,
                 id: localData.id || localData.localId, // Prioritize Firestore ID if synced
                 photos: localData.photos.map(p => ({ name: p.name, url: p.dataUri || p.url || '' })),
+                // releasedAt from IndexedDB is already expected to be string or null
               };
             }
           }

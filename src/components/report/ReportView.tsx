@@ -143,7 +143,7 @@ export function ReportView({ reportData }: ReportViewProps) {
           <Section title="Vehicle Release Status" icon={isReleased ? CheckSquare : Square}>
             <DataItem label="Status" value={isReleased ? "Released" : "Not Released"} />
             {isReleased && releasedAt && (
-              <DataItem label="Released Date" value={new Date(releasedAt).toLocaleString()} />
+              <DataItem label="Released Date" value={new Date(releasedAt).toLocaleDateString()} />
             )}
             {isReleased && releasedByUserName && (
               <DataItem label="Released By" value={releasedByUserName} />

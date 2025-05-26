@@ -23,7 +23,7 @@ import { collection, getDocs, query, orderBy, doc, updateDoc, Timestamp } from '
 import { useAuth } from '@/hooks/useAuth';
 import { USER_ROLES } from '@/lib/constants';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { getOfflineInspections, type LocalInspectionData, updateInspectionOffline } from '@/lib/indexedDB'; // Changed import
+import { getOfflineInspections, type LocalInspectionData, updateInspectionOffline } from '@/lib/indexedDB';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -80,7 +80,11 @@ export default function InspectionsListPage() {
     const combinedMap = new Map<string, InspectionData | LocalInspectionData>();
     
     fetchedOfflineInspections.forEach(item => {
-      combinedMap.set(item.localId, { ...item }); 
+       const normalizedItem = {
+        ...item,
+        releasedAt: typeof item.releasedAt === 'object' && item.releasedAt !== null ? (item.releasedAt as any).toDate().toISOString() : item.releasedAt,
+      };
+      combinedMap.set(item.localId, { ...normalizedItem }); 
     });
 
     fetchedOnlineInspections.forEach(item => {
@@ -144,11 +148,11 @@ export default function InspectionsListPage() {
         const inspectionDocRef = doc(firestore, 'inspections', inspection.id);
         await updateDoc(inspectionDocRef, {
             ...releaseData,
-            releasedAt: newReleasedState ? Timestamp.fromDate(new Date()) : null,
+            releasedAt: newReleasedState ? Timestamp.fromDate(new Date(releaseData.releasedAt!)) : null,
         });
         toast({ title: "Success", description: `Vehicle release status updated for ${inspection.truckIdNo}.` });
         // Update local IndexedDB copy to match, ensure needsSync is 0 for these fields
-        await updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 0 }); // Changed call
+        await updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 0 });
         success = true;
       } catch (error) {
         console.error("Error updating release status in Firestore:", error);
@@ -160,7 +164,7 @@ export default function InspectionsListPage() {
     // Offline update or if online failed
     if (!success) {
       try {
-        await updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 1 }); // Changed call
+        await updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 1 });
         toast({ title: "Success", description: `Vehicle release status updated locally for ${inspection.truckIdNo}.` });
         success = true;
       } catch (error) {
@@ -271,7 +275,8 @@ export default function InspectionsListPage() {
                     : (inspection as InspectionData).needsSync === true; 
 
                   const isConsideredSynced = !!(inspection.id && !needsSync);
-                  const linkId = isConsideredSynced ? inspection.id : (inspection as LocalInspectionData).localId;
+                  // Use Firestore ID for link if synced and available, otherwise use localId
+                  const linkId = (isConsideredSynced && inspection.id) ? inspection.id : (inspection as LocalInspectionData).localId;
                   const keyId = (inspection as LocalInspectionData).localId || inspection.id;
                   const currentItemId = (inspection as LocalInspectionData).localId || inspection.id;
                   

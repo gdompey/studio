@@ -92,7 +92,12 @@ export default function DashboardPage() {
     const combinedMap = new Map<string, InspectionData | LocalInspectionData>();
     
     fetchedOfflineInspections.forEach(item => {
-      combinedMap.set(item.localId, { ...item }); 
+      // Ensure releasedAt is a string or null if it exists
+      const normalizedItem = {
+        ...item,
+        releasedAt: typeof item.releasedAt === 'object' && item.releasedAt !== null ? (item.releasedAt as any).toDate().toISOString() : item.releasedAt,
+      };
+      combinedMap.set(item.localId, { ...normalizedItem }); 
     });
 
     fetchedOnlineInspections.forEach(item => {
