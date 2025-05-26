@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   images: {
+    domains: ['firebasestorage.googleapis.com', 'lh3.googleusercontent.com', 'placehold.co'],
     remotePatterns: [
       {
         protocol: 'https',
