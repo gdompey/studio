@@ -43,6 +43,7 @@ export interface InspectionData {
   inspectorName?: string;
   truckIdNo: string;
   truckRegNo: string;
+  vehicleOdometer?: string; // Added Vehicle Odometer
   workshopLocation?: string;
   timestamp: string; // ISO string
   photos: Array<{ name: string; url: string; }>; // For Firestore, always store name and Firebase Storage URL

@@ -16,6 +16,7 @@ export interface LocalInspectionData extends Omit<InspectionData, 'id' | 'photos
   needsSync: number; // 0 for false, 1 for true
   timestamp: string; // Ensure timestamp is always string
   workshopLocation?: string; 
+  vehicleOdometer?: string; // Added Vehicle Odometer
 
   // New fields for vehicle release (match InspectionData)
   isReleased?: boolean;

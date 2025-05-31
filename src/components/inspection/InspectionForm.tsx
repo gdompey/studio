@@ -19,7 +19,7 @@ import { DamageReportSection } from './DamageReportSection'; // Assuming DamageR
 import { useAuth } from '@/hooks/useAuth';
 import type { ChecklistItem, InspectionData, InspectionPhoto as ClientInspectionPhoto } from '@/types';
 import { USER_ROLES } from '@/lib/constants';
-import { AlertCircle, CheckCircle, Loader2, FileOutput, ListChecks, Car, Truck, StickyNote, Fuel, UserCircle, Building, Users, Briefcase, Camera, Save, Home } from 'lucide-react'; // Added Home icon for workshop
+import { AlertCircle, CheckCircle, Loader2, FileOutput, ListChecks, Car, Truck, StickyNote, Fuel, UserCircle, Building, Users, Briefcase, Camera, Save, Home, Gauge } from 'lucide-react'; // Added Home, Gauge icons
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { firestore, storage } from '@/lib/firebase/config';
@@ -32,6 +32,7 @@ import { saveInspectionOffline, type LocalInspectionData } from '@/lib/indexedDB
 const inspectionFormSchema = z.object({
   truckIdNo: z.string().min(1, "Truck ID No. is required"),
   truckRegNo: z.string().min(1, "Truck Reg No. is required"),
+  vehicleOdometer: z.string().optional(), // Added Vehicle Odometer
   workshopLocation: z.string().min(1, "Workshop location is required"),
   generalNotes: z.string().optional(),
   checklistAnswers: z.record(z.any()).default({}),
@@ -109,6 +110,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
     defaultValues: {
       truckIdNo: '',
       truckRegNo: '',
+      vehicleOdometer: '', // Initialize odometer
       workshopLocation: '',
       generalNotes: '',
       checklistAnswers: {},
@@ -142,6 +144,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
         inspectorName: user.name || user.email || "Unknown Inspector",
         truckIdNo: data.truckIdNo.toUpperCase(),
         truckRegNo: data.truckRegNo.toUpperCase(),
+        vehicleOdometer: data.vehicleOdometer, // Include odometer
         workshopLocation: data.workshopLocation,
         timestamp: new Date().toISOString(),
         notes: data.generalNotes,
@@ -205,6 +208,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
         inspectorName: user!.name || user!.email || "Unknown Inspector",
         truckIdNo: data.truckIdNo.toUpperCase(),
         truckRegNo: data.truckRegNo.toUpperCase(),
+        vehicleOdometer: data.vehicleOdometer, // Include odometer
         workshopLocation: data.workshopLocation,
         timestamp: new Date().toISOString(),
         // Store photos with dataUris for offline
@@ -397,6 +401,19 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
                   <FormLabel>Truck Registration No.</FormLabel>
                   <FormControl>
                     <Input placeholder="Enter Truck Registration No." {...field} className="uppercase" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+             <FormField
+              control={form.control}
+              name="vehicleOdometer"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="flex items-center gap-1"><Gauge className="h-4 w-4 text-muted-foreground" />Vehicle Odometer (km)</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Enter Odometer Reading" {...field} type="text" inputMode="numeric" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
