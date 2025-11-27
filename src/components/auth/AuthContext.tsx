@@ -1,4 +1,3 @@
-
 // src/components/auth/AuthContext.tsx
 "use client";
 
@@ -11,7 +10,8 @@ import {
   GoogleAuthProvider, 
   signInWithPopup,
   updateProfile,
-  sendPasswordResetEmail as firebaseSendPasswordResetEmail
+  sendPasswordResetEmail as firebaseSendPasswordResetEmail,
+  type FirebaseError
 } from 'firebase/auth';
 import { auth, firestore, storage } from '@/lib/firebase/config'; 
 import type { InspectionData as FirestoreInspectionData, User } from '@/types';
@@ -24,7 +24,8 @@ import { getInspectionsToSync, markInspectionSynced, type LocalInspectionData, u
 import { addDoc, collection, doc, setDoc, Timestamp, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useToast } from '@/hooks/use-toast';
-
+import { FirestorePermissionError } from '@/firebase/errors';
+import { errorEmitter } from '@/firebase/error-emitter';
 
 interface AuthContextType {
   user: User | null;
@@ -70,46 +71,61 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (firebaseUser.email === SPECIAL_ADMIN_EMAIL) {
       userRole = USER_ROLES.ADMIN;
     }
+    
+    const docSnap = await getDoc(userDocRef).catch(serverError => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: userDocRef.path,
+            operation: 'get',
+        }));
+        throw serverError; // re-throw to be caught by outer try/catch
+    });
 
-    try {
-      const docSnap = await getDoc(userDocRef);
-      if (docSnap.exists()) {
-        // User profile exists
+    if (docSnap.exists()) {
         const existingData = docSnap.data() as User;
         userRole = firebaseUser.email === SPECIAL_ADMIN_EMAIL ? USER_ROLES.ADMIN : existingData.role || USER_ROLES.INSPECTOR;
         
         userProfileData = {
-          ...existingData,
-          name: displayName || firebaseUser.displayName || existingData.name,
-          email: firebaseUser.email,
-          avatarUrl: firebaseUser.photoURL || existingData.avatarUrl,
-          role: userRole, // Ensure admin override
-          lastLoginAt: Timestamp.now().toDate().toISOString(),
+            ...existingData,
+            name: displayName || firebaseUser.displayName || existingData.name,
+            email: firebaseUser.email,
+            avatarUrl: firebaseUser.photoURL || existingData.avatarUrl,
+            role: userRole,
+            lastLoginAt: Timestamp.now().toDate().toISOString(),
         };
-        await updateDoc(userDocRef, {
+        updateDoc(userDocRef, {
             name: userProfileData.name,
             email: userProfileData.email,
             avatarUrl: userProfileData.avatarUrl,
             role: userProfileData.role,
             lastLoginAt: userProfileData.lastLoginAt,
+        }).catch(serverError => {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: userDocRef.path,
+                operation: 'update',
+                requestResourceData: { role: userProfileData.role, lastLoginAt: userProfileData.lastLoginAt }
+            }));
         });
-
-      } else {
-        // New user or profile doesn't exist, create it
+    } else {
         userProfileData = {
-          id: firebaseUser.uid,
-          email: firebaseUser.email,
-          name: displayName || firebaseUser.displayName,
-          avatarUrl: firebaseUser.photoURL,
-          role: userRole,
-          isDisabled: false,
-          createdAt: Timestamp.now().toDate().toISOString(),
-          lastLoginAt: Timestamp.now().toDate().toISOString(),
+            id: firebaseUser.uid,
+            email: firebaseUser.email,
+            name: displayName || firebaseUser.displayName,
+            avatarUrl: firebaseUser.photoURL,
+            role: userRole,
+            isDisabled: false,
+            createdAt: Timestamp.now().toDate().toISOString(),
+            lastLoginAt: Timestamp.now().toDate().toISOString(),
         };
-        await setDoc(userDocRef, userProfileData);
-      }
-      
-      const appUser: User = {
+        setDoc(userDocRef, userProfileData).catch(serverError => {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: userDocRef.path,
+                operation: 'create',
+                requestResourceData: userProfileData,
+            }));
+        });
+    }
+    
+    const appUser: User = {
         id: firebaseUser.uid,
         email: userProfileData.email,
         name: userProfileData.name,
@@ -118,32 +134,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isDisabled: userProfileData.isDisabled,
         createdAt: userProfileData.createdAt,
         lastLoginAt: userProfileData.lastLoginAt,
-      };
-      setUser(appUser);
-      localStorage.setItem(`${APP_NAME}-user`, JSON.stringify(appUser));
+    };
+    setUser(appUser);
+    localStorage.setItem(`${APP_NAME}-user`, JSON.stringify(appUser));
 
-      if(appUser.isDisabled) {
+    if(appUser.isDisabled) {
         toast({variant: "destructive", title: "Account Disabled", description: "Your account has been disabled. Please contact an administrator."});
-        await firebaseSignOut(auth); // Sign out disabled user
-        return null; // Return null to signify disabled user
-      }
-      return appUser;
-
-    } catch (error) {
-      console.error("Error managing user profile in Firestore:", error);
-      toast({variant: "destructive", title: "Profile Error", description: "Could not load or create user profile."});
-      // Fallback to basic user data if Firestore fails, but without role from DB
-      const fallbackUser: User = {
-          id: firebaseUser.uid,
-          email: firebaseUser.email,
-          name: firebaseUser.displayName,
-          avatarUrl: firebaseUser.photoURL,
-          role: firebaseUser.email === SPECIAL_ADMIN_EMAIL ? USER_ROLES.ADMIN : USER_ROLES.INSPECTOR, // Default role on error
-      };
-      setUser(fallbackUser);
-      localStorage.setItem(`${APP_NAME}-user`, JSON.stringify(fallbackUser));
-      return fallbackUser;
+        await firebaseSignOut(auth);
+        return null;
     }
+    return appUser;
+
   }, [toast]);
 
 
@@ -151,8 +152,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setHasMounted(true);
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUserType | null) => {
       if (firebaseUser) {
-        const appUser = await manageUserProfile(firebaseUser);
-        if (!appUser) { // User is disabled or profile management failed critically
+        try {
+            const appUser = await manageUserProfile(firebaseUser);
+            if (!appUser) { // User is disabled or profile management failed critically
+                setUser(null);
+                localStorage.removeItem(`${APP_NAME}-user`);
+            }
+        } catch (e) {
+            console.error("Critical error managing user profile, signing out:", e);
+            await firebaseSignOut(auth);
             setUser(null);
             localStorage.removeItem(`${APP_NAME}-user`);
         }
@@ -247,12 +255,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (firestoreIdToUse) { 
             console.log(`Sync: Updating existing inspection ${firestoreIdToUse} (local: ${currentLocalId}) in Firestore.`);
             const docRef = doc(firestore, "inspections", firestoreIdToUse);
-            await setDoc(docRef, firestoreData, { merge: true });
+            setDoc(docRef, firestoreData, { merge: true }).catch(serverError => {
+                errorEmitter.emit('permission-error', new FirestorePermissionError({
+                    path: docRef.path,
+                    operation: 'update',
+                    requestResourceData: firestoreData,
+                }));
+            });
             await markInspectionSynced(currentLocalId, firestoreIdToUse);
           } else { 
             console.log(`Sync: Saving new inspection ${currentLocalId} to Firestore.`);
-            const docRef = await addDoc(collection(firestore, "inspections"), firestoreData);
-            await markInspectionSynced(currentLocalId, docRef.id);
+            addDoc(collection(firestore, "inspections"), firestoreData).then(docRef => {
+                markInspectionSynced(currentLocalId, docRef.id);
+            }).catch(serverError => {
+                errorEmitter.emit('permission-error', new FirestorePermissionError({
+                    path: `inspections/(new_document)`,
+                    operation: 'create',
+                    requestResourceData: firestoreData,
+                }));
+            });
           }
           
           await updateSyncedInspectionPhotos(currentLocalId, firestoreData.photos as Array<{name: string; url: string}>);
@@ -282,7 +303,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       isSyncingRef.current = false;
       setIsSyncing(false);
     }
-  }, [isOnline, user, toast, manageUserProfile]); 
+  }, [isOnline, user, toast]); 
 
 
   useEffect(() => {
@@ -317,9 +338,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           router.push('/dashboard');
           toast({ title: 'Signed in successfully!' });
         } else if (appUser?.isDisabled) {
-          // Already handled by manageUserProfile, but as a safeguard:
           await firebaseSignOut(auth);
-          router.push('/auth/signin'); // Stay on signin page
+          router.push('/auth/signin'); 
         } else {
            throw new Error('Failed to manage user profile after sign-in.');
         }
@@ -328,13 +348,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
     } catch (error) {
-      console.error("Sign in failed", error);
-      toast({
-        title: 'Sign in failed',
-        description: (error as Error).message || 'Please check your credentials and try again.',
-        variant: 'destructive',
-      });
-      throw error; // Re-throw for form to handle
+      const firebaseError = error as FirebaseError;
+      if (firebaseError.code === 'auth/popup-closed-by-user') {
+         toast({
+          title: 'Sign-in Cancelled',
+          description: 'The Google Sign-In popup was closed before completion.',
+          variant: 'default',
+        });
+      } else {
+        toast({
+          title: 'Sign in failed',
+          description: (error as Error).message || 'Please check your credentials and try again.',
+          variant: 'destructive',
+        });
+      }
+      throw error; 
     } finally {
       setLoading(false);
     }
@@ -367,7 +395,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (credentials.name) {
             await updateProfile(userCredential.user, { displayName: credentials.name });
         }
-        // manageUserProfile will create the Firestore doc and set the user state
         const appUser = await manageUserProfile(userCredential.user, true, credentials.name);
         if(appUser) {
             router.push('/dashboard');
@@ -379,13 +406,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
          throw new Error("User creation did not return a user object.");
       }
     } catch (error) {
-      console.error("Sign up failed", error);
       toast({
         title: 'Sign up failed',
         description: (error as Error).message || 'An error occurred. Please try again.',
         variant: 'destructive',
       });
-      throw error; // Re-throw for form to handle
+      throw error; 
     } finally {
         setLoading(false);
     }

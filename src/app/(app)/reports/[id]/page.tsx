@@ -11,6 +11,8 @@ import { firestore } from '@/lib/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import { getInspectionByIdOffline, type LocalInspectionData } from '@/lib/indexedDB';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 export default function ReportPage() {
   const params = useParams();
@@ -31,7 +33,14 @@ export default function ReportPage() {
           // Try fetching from Firestore if online or if ID doesn't look like a localId
           if (isOnline && !reportId.startsWith('offline_')) {
             const reportDocRef = doc(firestore, 'inspections', reportId);
-            const docSnap = await getDoc(reportDocRef);
+            const docSnap = await getDoc(reportDocRef).catch(serverError => {
+                errorEmitter.emit('permission-error', new FirestorePermissionError({
+                    path: reportDocRef.path,
+                    operation: 'get',
+                }));
+                throw serverError;
+            });
+
             if (docSnap.exists()) {
               const firestoreData = docSnap.data();
               data = { 
@@ -62,7 +71,7 @@ export default function ReportPage() {
             setError(`Report with ID ${reportId} not found.`);
           }
         } catch (e) {
-          setError("Failed to load report data.");
+          setError("Failed to load report data. Check permissions or network.");
           console.error(e);
         } finally {
           setLoading(false);

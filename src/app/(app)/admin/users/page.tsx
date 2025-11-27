@@ -1,4 +1,3 @@
-
 // src/app/(app)/admin/users/page.tsx
 "use client";
 
@@ -7,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { USER_ROLES, SPECIAL_ADMIN_EMAIL } from '@/lib/constants'; // Ensure SPECIAL_ADMIN_EMAIL is imported
 import type { User } from '@/types';
 import { firestore } from '@/lib/firebase/config';
-import { collection, getDocs, doc, updateDoc, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, Timestamp, getDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,6 +25,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
+
 
 export default function ManageUsersPage() {
   const { user: currentUser, role: currentUserRole, sendPasswordResetEmail } = useAuth();
@@ -39,12 +41,18 @@ export default function ManageUsersPage() {
     setLoading(true);
     try {
       const usersCollectionRef = collection(firestore, 'users');
-      const querySnapshot = await getDocs(usersCollectionRef);
+      const querySnapshot = await getDocs(usersCollectionRef).catch(serverError => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: usersCollectionRef.path,
+            operation: 'list',
+        }));
+        throw serverError;
+      });
       const fetchedUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
       setUsersList(fetchedUsers.sort((a,b) => (a.name || a.email || '').localeCompare(b.name || b.email || '')));
     } catch (error) {
       console.error("Error fetching users:", error);
-      toast({ variant: "destructive", title: "Error", description: "Could not fetch users list." });
+      toast({ variant: "destructive", title: "Error", description: "Could not fetch users list. Check permissions." });
     } finally {
       setLoading(false);
     }
@@ -55,7 +63,7 @@ export default function ManageUsersPage() {
   }, [fetchUsers]);
 
   const handleToggleAdminRole = async (targetUser: User) => {
-    if (!currentUser || currentUser.id === targetUser.id && targetUser.email !== SPECIAL_ADMIN_EMAIL) {
+    if (!currentUser || currentUser.id === targetUser.id && currentUser.email !== SPECIAL_ADMIN_EMAIL) {
       toast({ variant: "destructive", title: "Action Denied", description: "You cannot change your own role unless you are the super admin." });
       return;
     }
@@ -66,17 +74,21 @@ export default function ManageUsersPage() {
 
     setUpdatingUserId(targetUser.id);
     const newRole = targetUser.role === USER_ROLES.ADMIN ? USER_ROLES.INSPECTOR : USER_ROLES.ADMIN;
-    try {
-      const userDocRef = doc(firestore, 'users', targetUser.id);
-      await updateDoc(userDocRef, { role: newRole });
-      toast({ title: "Success", description: `${targetUser.name || targetUser.email}'s role updated to ${newRole}.` });
-      fetchUsers(); // Refresh list
-    } catch (error) {
-      console.error("Error updating role:", error);
-      toast({ variant: "destructive", title: "Update Failed", description: "Could not update user role." });
-    } finally {
-      setUpdatingUserId(null);
-    }
+    
+    const userDocRef = doc(firestore, 'users', targetUser.id);
+    updateDoc(userDocRef, { role: newRole }).then(() => {
+        toast({ title: "Success", description: `${targetUser.name || targetUser.email}'s role updated to ${newRole}.` });
+        fetchUsers();
+    }).catch(serverError => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: userDocRef.path,
+            operation: 'update',
+            requestResourceData: { role: newRole }
+        }));
+        toast({ variant: "destructive", title: "Update Failed", description: "Could not update user role." });
+    }).finally(() => {
+        setUpdatingUserId(null);
+    });
   };
 
   const handleToggleUserStatus = async (targetUser: User) => {
@@ -91,18 +103,21 @@ export default function ManageUsersPage() {
 
     setUpdatingUserId(targetUser.id);
     const newDisabledStatus = !targetUser.isDisabled;
-    try {
-      const userDocRef = doc(firestore, 'users', targetUser.id);
-      await updateDoc(userDocRef, { isDisabled: newDisabledStatus });
-      // Note: This only updates the Firestore flag. Actual Firebase Auth disable requires Admin SDK (backend).
-      toast({ title: "Success", description: `${targetUser.name || targetUser.email} has been ${newDisabledStatus ? 'disabled' : 'enabled'}. Full disable/enable takes effect via Firebase Auth backend.` });
-      fetchUsers(); // Refresh list
-    } catch (error) {
-      console.error("Error updating user status:", error);
-      toast({ variant: "destructive", title: "Update Failed", description: "Could not update user status." });
-    } finally {
-      setUpdatingUserId(null);
-    }
+    
+    const userDocRef = doc(firestore, 'users', targetUser.id);
+    updateDoc(userDocRef, { isDisabled: newDisabledStatus }).then(() => {
+        toast({ title: "Success", description: `${targetUser.name || targetUser.email} has been ${newDisabledStatus ? 'disabled' : 'enabled'}.` });
+        fetchUsers();
+    }).catch(serverError => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: userDocRef.path,
+            operation: 'update',
+            requestResourceData: { isDisabled: newDisabledStatus }
+        }));
+        toast({ variant: "destructive", title: "Update Failed", description: "Could not update user status." });
+    }).finally(() => {
+        setUpdatingUserId(null);
+    });
   };
 
   const handlePasswordReset = async (email: string | null) => {
@@ -110,10 +125,9 @@ export default function ManageUsersPage() {
       toast({ variant: "destructive", title: "Error", description: "User email is not available." });
       return;
     }
-    setUpdatingUserId(email); // Use email as temp ID for loading state on button
+    setUpdatingUserId(email);
     try {
       await sendPasswordResetEmail(email);
-      // Toast is handled by AuthContext
     } catch (error) {
        // Toast is handled by AuthContext
     } finally {
@@ -189,7 +203,7 @@ export default function ManageUsersPage() {
                       id={`admin-switch-${user.id}`}
                       checked={user.role === USER_ROLES.ADMIN}
                       onCheckedChange={() => handleToggleAdminRole(user)}
-                      disabled={user.email === SPECIAL_ADMIN_EMAIL || (currentUser?.id === user.id && user.email !== SPECIAL_ADMIN_EMAIL)}
+                      disabled={user.email === SPECIAL_ADMIN_EMAIL || (currentUser?.id === user.id && currentUser?.email !== SPECIAL_ADMIN_EMAIL)}
                       aria-label={`Toggle admin role for ${user.name || user.email}`}
                     />
                   )}

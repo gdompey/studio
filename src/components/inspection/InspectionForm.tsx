@@ -1,4 +1,3 @@
-
 // src/components/inspection/InspectionForm.tsx
 "use client";
 
@@ -27,6 +26,8 @@ import { addDoc, collection, doc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { saveInspectionOffline, type LocalInspectionData } from '@/lib/indexedDB'; // Import LocalInspectionData type
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 // Define a more comprehensive schema for the form
 const inspectionFormSchema = z.object({
@@ -137,14 +138,13 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
 
     const localId = `offline_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-    // Prepare data for both online and offline saving
     const inspectionBaseData = {
-        localId, // Used as key in IndexedDB and can be stored in Firestore for reconciliation
+        localId,
         inspectorId: user.id,
         inspectorName: user.name || user.email || "Unknown Inspector",
         truckIdNo: data.truckIdNo.toUpperCase(),
         truckRegNo: data.truckRegNo.toUpperCase(),
-        vehicleOdometer: data.vehicleOdometer, // Include odometer
+        vehicleOdometer: data.vehicleOdometer,
         workshopLocation: data.workshopLocation,
         timestamp: new Date().toISOString(),
         notes: data.generalNotes,
@@ -161,7 +161,6 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
           if (clientPhoto.dataUri && !clientPhoto.url.startsWith('https://firebasestorage.googleapis.com')) {
             const photoBlob = dataURIToBlob(clientPhoto.dataUri);
             const photoName = clientPhoto.name || `photo_${Date.now()}`;
-            // Use localId for path predictability before Firestore doc is created
             const photoRef = ref(storage, `inspections/${localId}/${photoName}`);
             await uploadBytes(photoRef, photoBlob);
             const downloadURL = await getDownloadURL(photoRef);
@@ -176,7 +175,15 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
           photos: uploadedPhotoMetadatas,
         };
 
-        const docRef = await addDoc(collection(firestore, "inspections"), inspectionDataToSaveOnline);
+        const inspectionsCollectionRef = collection(firestore, "inspections");
+        const docRef = await addDoc(inspectionsCollectionRef, inspectionDataToSaveOnline).catch(serverError => {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: inspectionsCollectionRef.path,
+                operation: 'create',
+                requestResourceData: inspectionDataToSaveOnline
+            }));
+            throw serverError;
+        });
         
         toast({
           title: "Inspection Saved Online!",
@@ -195,7 +202,6 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
         await saveToOfflineDB(data, localId);
       }
     } else {
-      // Offline saving
       await saveToOfflineDB(data, localId);
     }
     setIsLoading(false);
@@ -204,14 +210,13 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
   const saveToOfflineDB = async (data: InspectionFormValues, localIdToUse: string) => {
      const inspectionDataToSaveOffline: LocalInspectionData = {
         localId: localIdToUse,
-        inspectorId: user!.id, // user is checked before onSubmit
+        inspectorId: user!.id,
         inspectorName: user!.name || user!.email || "Unknown Inspector",
         truckIdNo: data.truckIdNo.toUpperCase(),
         truckRegNo: data.truckRegNo.toUpperCase(),
-        vehicleOdometer: data.vehicleOdometer, // Include odometer
+        vehicleOdometer: data.vehicleOdometer,
         workshopLocation: data.workshopLocation,
         timestamp: new Date().toISOString(),
-        // Store photos with dataUris for offline
         photos: allClientPhotos.map(p => ({ name: p.name, url: p.url, dataUri: p.dataUri })),
         notes: data.generalNotes,
         checklistAnswers: data.checklistAnswers,
@@ -227,7 +232,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
           title: "Inspection Saved Offline",
           description: `Truck ID ${data.truckIdNo} saved locally. Will sync when online.`,
         });
-        router.push('/inspections'); // Navigate to list page, which should show offline items
+        router.push('/inspections');
       } catch (offlineError) {
         console.error("Error saving inspection offline:", offlineError);
         toast({
@@ -242,15 +247,12 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
     const clientPhotos: ClientInspectionPhoto[] = newlyUploadedPhotos.map(p => ({...p, url: '' }));
 
     if (formItemId) {
-      // Store just dataUris or a reference in checklistAnswers if type is 'photo'
       const currentChecklistPhotos = (form.getValues(`checklistAnswers.${formItemId}`) as string[] || []);
       setValue(`checklistAnswers.${formItemId}` as const, [...currentChecklistPhotos, ...clientPhotos.map(p => p.dataUri!)]);
-      // Add to allClientPhotos for global tracking and AI
       setAllClientPhotos(prev => [...prev.filter(ex => !clientPhotos.some(np => np.dataUri === ex.dataUri)), ...clientPhotos]);
       setPhotoDataUrisForAI(prev => [...new Set([...prev, ...clientPhotos.map(p => p.dataUri!)])]);
 
     } else { 
-      // General photos
       setAllClientPhotos(prev => [...prev.filter(ex => !clientPhotos.some(np => np.dataUri === ex.dataUri)), ...clientPhotos]);
       setPhotoDataUrisForAI(prev => [...new Set([...prev, ...clientPhotos.map(p => p.dataUri!)])]);
     }
@@ -298,7 +300,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
           {item.label} {item.required && <span className="text-destructive ml-1">*</span>}
         </FormLabel>
         <FormControl>
-          <div> {/* Ensure FormControl has a single direct child that can accept props */}
+          <div>
             {item.type === 'text' && <Input {...formRegister(fieldName)} />}
             {item.type === 'textarea' && <Textarea {...formRegister(fieldName)} rows={3} />}
             {item.type === 'checkbox' && (
@@ -308,7 +310,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
                   control={control}
                   render={({ field }) => (
                     <Checkbox
-                      id={item.id} // id for label association
+                      id={item.id}
                       checked={field.value || false}
                       onCheckedChange={field.onChange}
                     />
@@ -356,11 +358,8 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
               />
             )}
             {item.type === 'photo' && (
-              // This PhotoUpload is specific to a checklist item.
-              // It should update checklistAnswers[item.id] with photo data (e.g., dataUris or references)
-              // And also contribute to the global allClientPhotos for AI and main storage.
               <PhotoUpload 
-                onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos, item.id)} // Pass item.id to track which checklist item the photos belong to
+                onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos, item.id)}
               />
             )}
           </div>
@@ -475,7 +474,6 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
                 </FormItem>
               )}
             />
-            {/* This PhotoUpload is for general photos, not tied to a checklist item. */}
             <PhotoUpload onPhotosUploaded={(photos) => handleFormPhotosUploaded(photos)} maxFiles={10} />
           </CardContent>
         </Card>
@@ -512,7 +510,7 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
             <ul className="list-disc list-inside text-sm">
               {Object.entries(formState.errors).map(([key, error]) => (
                  <li key={key}>
-                  {key === 'checklistAnswers' && error && typeof error === 'object' && error.message === undefined // Check if it's nested checklist errors
+                  {key === 'checklistAnswers' && error && typeof error === 'object' && error.message === undefined
                     ? Object.entries(error as Record<string, any>).map(([itemKey, itemError]) => (
                         itemError?.message ? `${itemKey.replace(/_/g, ' ')}: ${itemError.message}` : null
                       )).filter(Boolean).join('; ')
@@ -526,4 +524,3 @@ export function InspectionForm({ initialPhotos = [], initialLocation = null }: I
     </Form>
   );
 }
-

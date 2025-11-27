@@ -6,6 +6,7 @@ import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/components/auth/AuthContext';
 import Head from 'next/head'; // Import Head
+import { FirebaseErrorListener } from '@/components/FirebaseErrorListener';
 
 export const metadata: Metadata = {
   title: 'IASL EC Manager',
@@ -41,6 +42,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <AuthProvider>
+          <FirebaseErrorListener />
           {children}
         </AuthProvider>
         <Toaster />

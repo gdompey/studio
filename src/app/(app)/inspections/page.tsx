@@ -1,4 +1,3 @@
-
 // src/app/(app)/inspections/page.tsx
 "use client";
 
@@ -28,6 +27,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { FirestorePermissionError } from '@/firebase/errors';
+import { errorEmitter } from '@/firebase/error-emitter';
 
 export default function InspectionsListPage() {
   const { user, role } = useAuth();
@@ -54,7 +55,13 @@ export default function InspectionsListPage() {
         const inspectionsCollectionRef = collection(firestore, 'inspections');
         const q = query(inspectionsCollectionRef, orderBy('timestamp', 'desc'));
         
-        const querySnapshot = await getDocs(q);
+        const querySnapshot = await getDocs(q).catch(serverError => {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: inspectionsCollectionRef.path,
+                operation: 'list',
+            }));
+            throw serverError;
+        });
         fetchedOnlineInspections = querySnapshot.docs.map(doc => {
           const data = doc.data() as Omit<InspectionData, 'id'>;
           return {
@@ -144,40 +151,50 @@ export default function InspectionsListPage() {
     let success = false;
     // Try online update first if possible
     if (isOnline && inspection.id) {
-      try {
         const inspectionDocRef = doc(firestore, 'inspections', inspection.id);
-        await updateDoc(inspectionDocRef, {
+        const dataForFirestore = {
             ...releaseData,
             releasedAt: newReleasedState ? Timestamp.fromDate(new Date(releaseData.releasedAt!)) : null,
+        };
+        updateDoc(inspectionDocRef, dataForFirestore).then(async () => {
+            toast({ title: "Success", description: `Vehicle release status updated for ${inspection.truckIdNo}.` });
+            await updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 0 });
+            success = true;
+            fetchInspections();
+        }).catch(serverError => {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: inspectionDocRef.path,
+                operation: 'update',
+                requestResourceData: dataForFirestore
+            }));
+            toast({ title: "Online Update Failed", description: "Saving release status locally.", variant: "destructive" });
+        }).finally(() => {
+             if (!success) {
+                updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 1 })
+                    .then(() => {
+                         toast({ title: "Success", description: `Vehicle release status updated locally for ${inspection.truckIdNo}.` });
+                         fetchInspections();
+                    }).catch(offlineError => {
+                        console.error("Error updating release status in IndexedDB:", offlineError);
+                        toast({ title: "Local Update Failed", description: "Could not save release status.", variant: "destructive" });
+                    });
+            }
+            setUpdatingRelease(null);
         });
-        toast({ title: "Success", description: `Vehicle release status updated for ${inspection.truckIdNo}.` });
-        // Update local IndexedDB copy to match, ensure needsSync is 0 for these fields
-        await updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 0 });
-        success = true;
-      } catch (error) {
-        console.error("Error updating release status in Firestore:", error);
-        toast({ title: "Online Update Failed", description: "Saving release status locally.", variant: "destructive" });
-        // Fall through to offline update
-      }
+        return; // exit function as we are handling everything in the promise chain
     }
     
-    // Offline update or if online failed
-    if (!success) {
-      try {
+    // Offline-only update
+    try {
         await updateInspectionOffline((inspection as LocalInspectionData).localId || inspection.id, { ...releaseData, needsSync: 1 });
         toast({ title: "Success", description: `Vehicle release status updated locally for ${inspection.truckIdNo}.` });
-        success = true;
-      } catch (error) {
+        fetchInspections();
+    } catch (error) {
         console.error("Error updating release status in IndexedDB:", error);
         toast({ title: "Local Update Failed", description: "Could not save release status.", variant: "destructive" });
-      }
+    } finally {
+        setUpdatingRelease(null);
     }
-
-    if (success) {
-      // Refresh the list to show updated status
-      fetchInspections();
-    }
-    setUpdatingRelease(null);
   };
 
 
